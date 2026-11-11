@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "nb_generate_deterministic_sample_data"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "9dc71be6-166c-8df7-462f-1f83d256a2b8"
+  }
+}
