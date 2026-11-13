@@ -100,6 +100,86 @@ print(f"Customer CSV mentve: {output_path}/{file_name}")
 
 # CELL ********************
 
+ADDRESS_ID_START = 3001
+address_plan = [
+    (32, ("Permanent", "Mailing", "Billing")),
+    (28, ("Permanent", "Mailing")),
+    (42, ("Permanent",)),
+]
+address_locations = [
+    ("1051", "Budapest", "Nador utca"),
+    ("4024", "Debrecen", "Piac utca"),
+    ("6720", "Szeged", "Karasz utca"),
+    ("7621", "Pecs", "Kiraly utca"),
+    ("9021", "Gyor", "Baross Gabor ut"),
+    ("3525", "Miskolc", "Szechenyi utca"),
+]
+
+assert sum(count for count, _ in address_plan) == len(customers)
+
+customer_addresses = []
+address_types_by_customer = {}
+customer_index = 0
+
+for count, address_types in address_plan:
+    for customer in customers[customer_index:customer_index + count]:
+        customer_id = customer["CustomerID"]
+        address_types_by_customer[customer_id] = set(address_types)
+
+        for address_type in address_types:
+            address_index = len(customer_addresses)
+            postal_code, city, street = address_locations[
+                address_index % len(address_locations)
+            ]
+            customer_addresses.append({
+                "AddressID": ADDRESS_ID_START + address_index,
+                "CustomerID": customer_id,
+                "AddressType": address_type,
+                "Country": "HU",
+                "PostalCode": postal_code,
+                "City": city,
+                "Street": street,
+                "HouseNumber": str(address_index // len(address_locations) + 1),
+            })
+
+    customer_index += count
+
+assert len(customer_addresses) == 194
+assert len({address["AddressID"] for address in customer_addresses}) == 194
+assert set(address_types_by_customer) == {
+    customer["CustomerID"] for customer in customers
+}
+assert all(
+    sum(types == set(address_types) for types in address_types_by_customer.values())
+    == count
+    for count, address_types in address_plan
+)
+
+file_name = f"CustomerAdress_{run_started_at:%Y%m%dT%H%M%S}.csv"
+customer_address_csv_path = os.path.join(output_dir, file_name)
+
+with open(customer_address_csv_path, "w", newline="", encoding="utf-8") as csv_file:
+    writer = csv.DictWriter(
+        csv_file,
+        fieldnames=[
+            "AddressID", "CustomerID", "AddressType", "Country",
+            "PostalCode", "City", "Street", "HouseNumber",
+        ],
+    )
+    writer.writeheader()
+    writer.writerows(customer_addresses)
+
+print(f"CustomerAdress CSV mentve: {output_path}/{file_name}")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 ACCOUNT_ID_START = 2001
 
 accounts = [
