@@ -81,6 +81,7 @@ display(df_with_meta.limit(10))
 entities = {
     "Account": "dbo.ld_oys_account",
     "Customer": "dbo.ld_oys_customer",
+    "CustomerAdress": "dbo.ld_oys_customeraddress",
     "DebitCard": "dbo.ld_oys_debitcard",
     "Transaction_Ledger": "dbo.ld_oys_transaction_ledger"
 }
