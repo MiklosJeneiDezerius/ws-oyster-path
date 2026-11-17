@@ -1,2 +1,7 @@
 .venv
 .vscode
+logs/
+~$*
+~WRL*.tmp
+.user.yml
+Oyster_Data_engineering_Exercises Solutions.docx

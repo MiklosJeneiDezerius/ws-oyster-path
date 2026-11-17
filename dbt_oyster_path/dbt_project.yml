@@ -34,3 +34,9 @@ models:
     # Config indicated by + and applies to all files under models/example/
     example:
       +materialized: view
+
+# Bronze layer = historized (SCD2) copies of the landing tables, built with dbt snapshots.
+snapshots:
+  dbt_oyster_path:
+    +schema: bronze
+    +dbt_valid_to_current: "cast('9999-12-31' as datetime2(6))"

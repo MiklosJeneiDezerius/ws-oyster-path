@@ -31,11 +31,25 @@
 
 # Welcome to your new notebook
 # Type here in the cell editor to add code!
+import re
 from pyspark.sql import functions as F
 
-# Define the relative path using wildcards to capture all date folders
-# This targets all 'Customer' CSV files across any date folder inside 'oyster'
-source_path = "Files/landing/oyster/*/Customer_*.csv"
+# Each generator run writes a new batch folder: Files/landing/oyster/<yyyyMMddHHmmss UTC>/
+p_root_path = "Files/landing/oyster"
+
+# Pick ONLY the latest batch folder (14-digit names sort chronologically)
+batch_folders = [
+    f.name.rstrip("/")
+    for f in notebookutils.fs.ls(p_root_path)
+    if f.isDir and re.fullmatch(r"\d{14}", f.name.rstrip("/"))
+]
+if not batch_folders:
+    raise FileNotFoundError(f"No batch folders found under {p_root_path}")
+latest_folder = max(batch_folders)
+print(f"Latest batch folder: {latest_folder} (out of {len(batch_folders)})")
+
+# This targets the 'Customer' CSV file in the latest batch folder only
+source_path = f"{p_root_path}/{latest_folder}/Customer_*.csv"
 
 # Define the target managed Delta table name
 target_table = "dbo.ld_oys_customer"
@@ -87,7 +101,7 @@ entities = {
 }
 
 for file_prefix, table_name in entities.items():
-    path = f"Files/landing/oyster/*/{file_prefix}_*.csv"
+    path = f"{p_root_path}/{latest_folder}/{file_prefix}_*.csv"
     
     df = (
         spark.read.format("csv")

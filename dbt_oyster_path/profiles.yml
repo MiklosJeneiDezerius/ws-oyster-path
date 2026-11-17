@@ -1,0 +1,22 @@
+dbt_oyster_path:
+  target: dev
+  outputs:
+    dev:
+      type: fabric
+      driver: 'ODBC Driver 18 for SQL Server'
+      server: 'xe6b73af6wce5cpkwv3dpk3vzi-g67texv6yj3enfghs4qteohnga.datawarehouse.fabric.microsoft.com'
+      port: 1433
+      database: 'dw_oyster_path'
+      schema: 'oyster'
+      authentication: 'CLI'
+      threads: 4
+    
+    prod:
+      type: fabric
+      driver: 'ODBC Driver 18 for SQL Server'
+      server: "{{ env_var('DBT_PROD_HOST', 'xe6b73af6wce5cpkwv3dpk3vzi-g67texv6yj3enfghs4qteohnga.datawarehouse.fabric.microsoft.com') }}"
+      port: 1433
+      database: "{{ env_var('DBT_PROD_DATABASE', 'dw_oyster_path') }}"
+      schema: 'oyster'
+      authentication: 'CLI'
+      threads: 4
