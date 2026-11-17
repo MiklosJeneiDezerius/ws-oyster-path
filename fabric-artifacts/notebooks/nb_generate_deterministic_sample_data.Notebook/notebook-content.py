@@ -11,18 +11,20 @@
 
 # CELL ********************
 
-#%%configure
-#{
-#    "defaultLakehouse": {
-#        "name": "lh_oyster_path"
-#    }
-#}
+# MAGIC %%configure
+# MAGIC {
+# MAGIC     "defaultLakehouse": {
+# MAGIC         "name": "lh_oyster_path"
+# MAGIC     }
+# MAGIC }
 
 # METADATA ********************
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark"
+# META   "language_group": "synapse_pyspark",
+# META   "frozen": true,
+# META   "editable": false
 # META }
 
 # CELL ********************
@@ -30,7 +32,8 @@
 import csv
 import os
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta, time
+import calendar
 
 # METADATA ********************
 
