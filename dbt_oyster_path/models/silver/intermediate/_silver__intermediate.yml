@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: int_customer_intervals
+    description: >
+      Candidate half-open customer observation intervals split at every customer
+      and address history boundary. Includes customer tombstone coverage but
+      excludes periods with no observed customer version. Not final SCD2 versions.
+      Run staging history and address ambiguity tests before using this view.
+    columns:
+      - name: customer_id
+        description: Normalized customer business key.
+      - name: valid_from
+        description: Inclusive candidate interval start.
+      - name: valid_to
+        description: Exclusive candidate interval end.
+
+  - name: int_customer_states
+    description: >
+      Customer attributes and separate Permanent, Mailing, and Billing address
+      groups resolved at each candidate interval start. Missing or deleted
+      address types yield NULL fields. Customer tombstones retain their names
+      and independently resolved addresses. No history coalescing or surrogate
+      keys yet. Requires passing staging history and address ambiguity tests.
+    columns:
+      - name: customer_id
+        description: Normalized customer business key.
+      - name: valid_from
+        description: Inclusive candidate interval start; unique together with customer_id.
+      - name: valid_to
+        description: Exclusive candidate interval end, unchanged from the timeline.
+      - name: first_name
+        description: Customer first name observed at the interval start.
+      - name: last_name
+        description: Customer last name observed at the interval start.
+      - name: is_deleted
+        description: Customer deletion state; does not imply deletion of address entities.

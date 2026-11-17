@@ -1,0 +1,27 @@
+selectors:
+  - name: silver_upstream_checks
+    description: Validate existing Landing and Bronze data without running models or snapshots.
+    definition:
+      intersection:
+        - method: resource_type
+          value: test
+        - union:
+            - method: path
+              value: models/landing
+            - method: path
+              value: models/bronze
+            - method: path
+              value: snapshots/bronze
+            - method: path
+              value: tests/landing
+            - method: path
+              value: tests/bronze
+
+  - name: silver
+    description: Build all Silver models and run their generic and shared singular tests, without rebuilding Bronze.
+    definition:
+      union:
+        - method: path
+          value: models/silver
+        - method: path
+          value: tests/silver

@@ -1,0 +1,174 @@
+version: 2
+
+models:
+  - name: stg_oys_customer
+    description: >
+      Cleaned customer observations. Retains every Bronze version and tombstone;
+      no joins or current-only filtering.
+    columns:
+      - name: customer_id_raw
+        description: Unmodified Bronze customer key for normalization diagnostics.
+      - name: customer_id
+        description: Trimmed text business key; blank values become NULL.
+        data_tests: [not_null]
+      - name: first_name
+        description: Trimmed first name; blank values become NULL.
+      - name: last_name
+        description: Trimmed last name; blank values become NULL.
+      - name: bronze_version_id
+        description: Original Bronze dbt_scd_id; not a Silver dimension key.
+        data_tests: [unique, not_null]
+      - name: observed_valid_from
+        description: Start of the Bronze observation interval, not guaranteed business-effective time.
+        data_tests: [not_null]
+      - name: observed_valid_to
+        description: Exclusive end of the Bronze observation interval; current rows use 9999-12-31.
+        data_tests: [not_null]
+      - name: source_deleted_raw
+        description: Original Bronze deletion flag for validation.
+      - name: is_deleted
+        description: True/False mapped to bit; unrecognized or missing flags become NULL.
+        data_tests: [not_null]
+
+  - name: stg_oys_customer_address
+    description: >
+      Cleaned address observations, including all address types, historical
+      versions, and tombstones. Address selection and customer denormalization
+      are deliberately deferred.
+    columns:
+      - name: address_id_raw
+        description: Unmodified Bronze address key.
+      - name: address_id
+        description: Trimmed text address key; blank values become NULL.
+        data_tests: [not_null]
+      - name: customer_id_raw
+        description: Unmodified Bronze customer reference.
+      - name: customer_id
+        description: Trimmed text customer reference.
+        data_tests: [not_null]
+      - name: address_type
+        description: Trimmed source address type; no preferred type is selected here.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Permanent', 'Mailing', 'Billing']
+      - name: postal_code
+        description: Text postal code, preserving leading zeros.
+      - name: house_number
+        description: Text house number, preserving nonnumeric components.
+      - name: bronze_version_id
+        description: Original Bronze dbt_scd_id.
+        data_tests: [unique, not_null]
+      - name: observed_valid_from
+        description: Start of the Bronze observation interval.
+        data_tests: [not_null]
+      - name: observed_valid_to
+        description: Exclusive end of the Bronze observation interval.
+        data_tests: [not_null]
+      - name: source_deleted_raw
+        description: Original Bronze deletion flag for validation.
+      - name: is_deleted
+        description: Parsed deletion bit; invalid flags become NULL.
+        data_tests: [not_null]
+
+  - name: stg_oys_account
+    description: >
+      Cleaned account observations with full Bronze history and tombstones.
+      Balance is preserved as a measure candidate, not designated an SCD2
+      descriptive attribute by this staging projection.
+    columns:
+      - name: account_id_raw
+        description: Unmodified Bronze account key.
+      - name: account_id
+        description: Trimmed text account key.
+        data_tests: [not_null]
+      - name: customer_id_raw
+        description: Unmodified Bronze customer reference.
+      - name: customer_id
+        description: Trimmed text customer reference.
+        data_tests: [not_null]
+      - name: balance_raw
+        description: Original balance string for conversion diagnostics.
+      - name: balance
+        description: Balance converted to decimal(18,2); failed conversion becomes NULL.
+        data_tests: [not_null]
+      - name: bronze_version_id
+        description: Original Bronze dbt_scd_id.
+        data_tests: [unique, not_null]
+      - name: observed_valid_from
+        description: Start of the Bronze observation interval.
+        data_tests: [not_null]
+      - name: observed_valid_to
+        description: Exclusive end of the Bronze observation interval.
+        data_tests: [not_null]
+      - name: source_deleted_raw
+        description: Original Bronze deletion flag for validation.
+      - name: is_deleted
+        description: Parsed deletion bit; invalid flags become NULL.
+        data_tests: [not_null]
+
+  - name: stg_oys_debitcard
+    description: >
+      Cleaned card observations with full Bronze history and tombstones.
+      Source activity and deletion are separate flags.
+    columns:
+      - name: card_id_raw
+        description: Unmodified Bronze card key.
+      - name: card_id
+        description: Trimmed text card key.
+        data_tests: [not_null]
+      - name: account_id_raw
+        description: Unmodified Bronze account reference.
+      - name: account_id
+        description: Trimmed text account reference.
+        data_tests: [not_null]
+      - name: card_tier
+        description: Trimmed source card tier.
+      - name: is_active_raw
+        description: Original activity flag for conversion diagnostics.
+      - name: is_active
+        description: True/1 and False/0 mapped to bit; other inputs become NULL.
+        data_tests: [not_null]
+      - name: bronze_version_id
+        description: Original Bronze dbt_scd_id.
+        data_tests: [unique, not_null]
+      - name: observed_valid_from
+        description: Start of the Bronze observation interval.
+        data_tests: [not_null]
+      - name: observed_valid_to
+        description: Exclusive end of the Bronze observation interval.
+        data_tests: [not_null]
+      - name: source_deleted_raw
+        description: Original Bronze deletion flag for validation.
+      - name: is_deleted
+        description: Parsed deletion bit; invalid flags become NULL.
+        data_tests: [not_null]
+
+  - name: stg_oys_transaction_ledger
+    description: >
+      Typed projection of accumulated immutable Bronze events. Retains raw IDs,
+      conversion inputs, and ingestion metadata; no joins or event filtering.
+    columns:
+      - name: transaction_id_raw
+        description: Unmodified Bronze transaction key.
+      - name: transaction_id
+        description: Trimmed text transaction key.
+        data_tests: [unique, not_null]
+      - name: account_id_raw
+        description: Unmodified Bronze account reference.
+      - name: account_id
+        description: Trimmed text account reference.
+        data_tests: [not_null]
+      - name: amount_raw
+        description: Original amount string for conversion diagnostics.
+      - name: amount
+        description: Amount converted to decimal(18,2); failed conversion becomes NULL.
+        data_tests: [not_null]
+      - name: transaction_timestamp_raw
+        description: Original timestamp string for conversion diagnostics.
+      - name: transaction_timestamp
+        description: >
+          Timestamp converted to datetime2(6) using style 120 for the source's
+          yyyy-MM-dd HH:mm:ss format. No timezone conversion is performed.
+        data_tests: [not_null]

@@ -29,15 +29,47 @@
 
 # CELL ********************
 
-# Welcome to your new notebook
-# Type here in the cell editor to add code!
+# Parameters (mark this cell in Fabric: ... -> Toggle parameter cell). Pipelines can override these.
+p_root_path = "Files/landing/oyster"
+p_batch_folder = ""   # "" = latest batch folder; or e.g. "20261117075137" to reload a specific batch
+p_entities = ""       # "" = all entities; or comma-separated, e.g. "Customer,Account"
+p_debug = 0           # 1 = display a preview of each loaded table
+
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
 import re
+from datetime import datetime, timezone
 from pyspark.sql import functions as F
 
-# Each generator run writes a new batch folder: Files/landing/oyster/<yyyyMMddHHmmss UTC>/
-p_root_path = "Files/landing/oyster"
+# file prefix -> (target table, business key, required columns in source order)
+ENTITIES = {
+    "Customer": ("dbo.ld_oys_customer", "CustomerID",
+                 ["CustomerID", "FirstName", "LastName"]),
+    "CustomerAdress": ("dbo.ld_oys_customeraddress", "AddressID",
+                       ["AddressID", "CustomerID", "AddressType", "Country",
+                        "PostalCode", "City", "Street", "HouseNumber"]),
+    "Account": ("dbo.ld_oys_account", "AccountID",
+                ["AccountID", "CustomerID", "Balance"]),
+    "DebitCard": ("dbo.ld_oys_debitcard", "CardID",
+                  ["CardID", "AccountID", "CardTier", "IsActive"]),
+    "Transaction_Ledger": ("dbo.ld_oys_transaction_ledger", "TransactionID",
+                           ["TransactionID", "AccountID", "Amount", "Timestamp"]),
+}
 
-# Pick ONLY the latest batch folder (14-digit names sort chronologically)
+selected = [e.strip() for e in p_entities.split(",") if e.strip()] or list(ENTITIES)
+unknown = sorted(set(selected) - set(ENTITIES))
+if unknown:
+    raise ValueError(f"Unknown entities: {unknown}. Allowed: {list(ENTITIES)}")
+
+# Batch folders are named yyyyMMddHHmmss (UTC) by the generator; 14-digit names sort chronologically
 batch_folders = [
     f.name.rstrip("/")
     for f in notebookutils.fs.ls(p_root_path)
@@ -45,41 +77,13 @@ batch_folders = [
 ]
 if not batch_folders:
     raise FileNotFoundError(f"No batch folders found under {p_root_path}")
-latest_folder = max(batch_folders)
-print(f"Latest batch folder: {latest_folder} (out of {len(batch_folders)})")
+if p_batch_folder and p_batch_folder not in batch_folders:
+    raise FileNotFoundError(f"Batch folder {p_batch_folder} not found under {p_root_path}")
+batch_folder = p_batch_folder or max(batch_folders)
 
-# This targets the 'Customer' CSV file in the latest batch folder only
-source_path = f"{p_root_path}/{latest_folder}/Customer_*.csv"
-
-# Define the target managed Delta table name
-target_table = "dbo.ld_oys_customer"
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# Read all matching CSV files across the date folders
-df = (
-    spark.read.format("csv")
-    .option("header", "true")
-    .option("inferSchema", "true")
-    .load(source_path)
-)
-
-# Add metadata columns for load time and source file name
-df_with_meta = (
-    df.withColumn("meta_load_timestamp", F.current_timestamp())
-      .withColumn("meta_source_file", F.element_at(F.split(F.input_file_name(), "/"), -1))
-)
-
-# Optional: Preview the data and metadata columns
-display(df_with_meta.limit(10))
+batch_ts = datetime.strptime(batch_folder, "%Y%m%d%H%M%S")    # when the source extracted the data
+load_ts = datetime.now(timezone.utc).replace(tzinfo=None)     # one load time for every table in this run
+print(f"Batch {batch_folder} (of {len(batch_folders)}) | entities: {selected} | load_ts (UTC): {load_ts}")
 
 
 # METADATA ********************
@@ -91,57 +95,59 @@ display(df_with_meta.limit(10))
 
 # CELL ********************
 
-#If you want to repeat this exact process for Account, DebitCard, and Transaction_Ledger in a single script, wrap the logic in a loop:
-entities = {
-    "Account": "dbo.ld_oys_account",
-    "Customer": "dbo.ld_oys_customer",
-    "CustomerAdress": "dbo.ld_oys_customeraddress",
-    "DebitCard": "dbo.ld_oys_debitcard",
-    "Transaction_Ledger": "dbo.ld_oys_transaction_ledger"
-}
+def prepare(file_prefix):
+    """Read one entity from the batch folder and validate it. Raises on any contract violation."""
+    table_name, business_key, required_columns = ENTITIES[file_prefix]
+    path = f"{p_root_path}/{batch_folder}/{file_prefix}_*.csv"
 
-for file_prefix, table_name in entities.items():
-    path = f"{p_root_path}/{latest_folder}/{file_prefix}_*.csv"
-    
     df = (
         spark.read.format("csv")
         .option("header", "true")
-        .option("inferSchema", "true")
+        .option("inferSchema", "false")   # raw STRING columns; types are applied in Silver
         .load(path)
-        .withColumn("meta_load_timestamp", F.current_timestamp())
-        .withColumn("meta_source_file", F.element_at(F.split(F.input_file_name(), "/"), -1))
     )
-    
+
+    if not df.take(1):
+        raise ValueError(f"{file_prefix}: source file contains no data rows in {path}")
+
+    # 1) Header validation. Spark renames duplicate headers (e.g. CustomerID0), so duplicates fail here too.
+    missing = [c for c in required_columns if c not in df.columns]
+    if missing:
+        raise ValueError(f"{file_prefix}: missing columns {missing}. Header was {df.columns}")
+    extra = [c for c in df.columns if c not in required_columns]
+    if extra:
+        print(f"WARNING {file_prefix}: unexpected columns {extra} are kept (landing schema grows)")
+
+    # 2) The business key must never be empty (the snapshot unique_key depends on it)
+    empty_keys = df.filter(F.col(business_key).isNull() | (F.trim(F.col(business_key)) == "")).count()
+    if empty_keys:
+        raise ValueError(f"{file_prefix}: {empty_keys} row(s) with empty {business_key} in {path}")
+
+    # 3) Required columns first, then any extras, then metadata
+    out = df.select(
+        *required_columns,
+        *extra,
+        F.lit(batch_ts).alias("meta_batch_timestamp"),
+        F.lit(load_ts).alias("meta_load_timestamp"),
+        F.col("_metadata.file_name").alias("meta_source_file"),
+    )
+    return table_name, out
+
+
+# Phase 1: validate EVERY selected entity before writing anything (a bad batch changes nothing)
+prepared = {e: prepare(e) for e in selected}
+
+# Phase 2: write
+for file_prefix, (table_name, out) in prepared.items():
     (
-        df.write.format("delta")
+        out.write.format("delta")
         .mode("overwrite")
         .option("overwriteSchema", "true")
         .saveAsTable(table_name)
     )
-    print(f"Loaded {file_prefix} into {table_name}")
-
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "frozen": true,
-# META   "editable": false
-# META }
-
-# CELL ********************
-
-# Write the DataFrame to a managed Delta table
-(
-    df_with_meta.write
-    .format("delta")
-    .mode("overwrite")
-    .option("overwriteSchema", "true")
-    .saveAsTable(target_table)
-)
-
-print(f"Successfully loaded data into {target_table}")
+    print(f"Loaded {file_prefix} -> {table_name}")
+    if int(p_debug):
+        display(spark.table(table_name).limit(10))
 
 
 # METADATA ********************
@@ -154,13 +160,21 @@ print(f"Successfully loaded data into {target_table}")
 # CELL ********************
 
 # MAGIC %%sql
-# MAGIC SELECT 
-# MAGIC     meta_load_timestamp,
-# MAGIC     meta_source_file,
-# MAGIC     COUNT(*) AS row_count
-# MAGIC FROM dbo.ld_oys_customer
-# MAGIC GROUP BY meta_load_timestamp, meta_source_file
-# MAGIC ORDER BY meta_source_file DESC;
+# MAGIC -- Expect one row per table, all with the SAME meta_batch_timestamp and meta_load_timestamp
+# MAGIC SELECT 'customer' AS tbl, meta_batch_timestamp, meta_load_timestamp, meta_source_file, COUNT(*) AS row_count
+# MAGIC FROM dbo.ld_oys_customer GROUP BY meta_batch_timestamp, meta_load_timestamp, meta_source_file
+# MAGIC UNION ALL
+# MAGIC SELECT 'customer_address', meta_batch_timestamp, meta_load_timestamp, meta_source_file, COUNT(*)
+# MAGIC FROM dbo.ld_oys_customeraddress GROUP BY meta_batch_timestamp, meta_load_timestamp, meta_source_file
+# MAGIC UNION ALL
+# MAGIC SELECT 'account', meta_batch_timestamp, meta_load_timestamp, meta_source_file, COUNT(*)
+# MAGIC FROM dbo.ld_oys_account GROUP BY meta_batch_timestamp, meta_load_timestamp, meta_source_file
+# MAGIC UNION ALL
+# MAGIC SELECT 'debitcard', meta_batch_timestamp, meta_load_timestamp, meta_source_file, COUNT(*)
+# MAGIC FROM dbo.ld_oys_debitcard GROUP BY meta_batch_timestamp, meta_load_timestamp, meta_source_file
+# MAGIC UNION ALL
+# MAGIC SELECT 'transaction_ledger', meta_batch_timestamp, meta_load_timestamp, meta_source_file, COUNT(*)
+# MAGIC FROM dbo.ld_oys_transaction_ledger GROUP BY meta_batch_timestamp, meta_load_timestamp, meta_source_file;
 
 
 # METADATA ********************

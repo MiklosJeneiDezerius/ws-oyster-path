@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: bz_oys_transaction_ledger
+    description: >
+      Append-only transaction events captured from landing. Full refresh is
+      disabled because landing contains only the latest batch. After initial
+      creation, run assert_transaction_events_immutable before subsequent loads
+      and stop on failure. Rebuilds require replaying retained source batches.
+    columns:
+      - name: TransactionID
+        data_tests:
+          - unique
+          - not_null

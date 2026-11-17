@@ -18,6 +18,10 @@ seed-paths: ["seeds"]
 macro-paths: ["macros"]
 snapshot-paths: ["snapshots"]
 
+vars:
+  silver_date_start: '2020-01-01'
+  silver_date_end: '2035-12-31'
+
 clean-targets:         # directories to be removed by `dbt clean`
   - "target"
   - "dbt_packages"
@@ -34,6 +38,11 @@ models:
     # Config indicated by + and applies to all files under models/example/
     example:
       +materialized: view
+    silver:
+      +schema: silver
+      +materialized: table
+      staging:
+        +materialized: view
 
 # Bronze layer = historized (SCD2) copies of the landing tables, built with dbt snapshots.
 snapshots:
