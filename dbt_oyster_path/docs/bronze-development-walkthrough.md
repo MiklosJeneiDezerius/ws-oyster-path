@@ -25,8 +25,8 @@ transactions resolve to account and customer versions under the initial-load
 history policy (Iteration 56). The Gold daily snapshot covers 2026-10-09 to
 2026-11-09 with 102 accounts per day and reconciles exactly with an
 independent recalculation from Silver. The semantic model and report are
-designed (Iteration 60) but not yet created. Production builds have not been
-run.
+designed (Iteration 60) but not yet created. Orchestration design has started
+(Part XI). Production builds have not been run.
 
 ## How to use this guide
 
@@ -3526,6 +3526,198 @@ Fabric report editor with the field assignments listed here.
 
 **Next step:** create the semantic model as designed (Direct Lake on OneLake,
 without RLS/DDM) and validate the measures with DAX queries.
+
+## Part XI. Orchestrate the end-to-end run
+
+The source document ends with an Azure Data Factory master pipeline that
+chains three steps on success: generate data, land raw files, run dbt. This
+part rebuilds that idea in Fabric, one small iteration at a time. Each
+iteration reuses artefacts that are already tested; no new transformation
+logic is written inside the pipeline.
+
+### Iteration 61 (O1). Map the document to Fabric and decide how dbt runs
+
+**Goal:** decide, before creating any item, what each document step becomes
+in Fabric and under which identity dbt runs.
+
+**Why:** the document uses a Databricks notebook, a Copy Data activity and
+"Publish All". Copying it literally would bypass the loader's validation and
+`meta_*` columns, and would leave the dbt identity undefined.
+
+| Document | Fabric implementation | Reason |
+|---|---|---|
+| ADF / Synapse Studio | Fabric Data pipeline `pl_master_orchestration` | One control plane, in the same workspace as the data |
+| `01_Generate_Data` (Databricks) | Notebook activity, `nb_generate_deterministic_sample_data` | Existing, tested notebook |
+| `02_Landing_Raw` (Copy Data) | Notebook activity, `nb_csv_load_source_to_ld` | Copy Data neither validates nor writes batch metadata |
+| `03_Run_dbt_Notebook` | Notebook activity, `nb_run_dbt` (new): clone from Azure DevOps, then `dbt build` | Chosen run method |
+| Green "On success" arrows | On success dependencies | Landing, then Bronze, Silver, Gold |
+| Validate, Debug, Publish All | Validate, Run, Save, then commit through Git integration | Fabric has no publish step |
+
+Target flow:
+
+```text
+pl_master_orchestration  (triggered manually)
+  01_generate_data  --on success-->  02_landing_raw  --on success-->  03_run_dbt
+  (generator)                        (validating loader)               (nb_run_dbt: clone + dbt build)
+```
+
+`nb_run_dbt` performs these steps:
+
+1. Install pinned versions, `dbt-core==1.12.6` and `dbt-fabric==1.12.0`,
+   matching the local environment.
+2. Read the Azure DevOps personal access token (PAT).
+3. Shallow-clone `main` from
+   `https://dev.azure.com/pulze-azure-devops/Oyster/_git/Oyster`. The PAT
+   travels only in an HTTP header; it is never put in the URL or printed.
+4. Run `dbt build` against a dedicated `fabric_notebook` target with
+   `authentication: notebookutils` and `threads: 1`.
+5. Copy `target/run_results.json` to Lakehouse Files as an audit record.
+6. Raise an exception when dbt fails, so the pipeline activity fails.
+
+#### Decision point: which run method
+
+| Option | Pros | Cons |
+|---|---|---|
+| A. Fabric dbt job item | Native, no install step, supports SPN/managed identity | Newer item type, less control over the runtime |
+| **B. Notebook (chosen)** | Full control, same commands as locally, easy to debug | Installs packages per run; we own the clone and auth code |
+| C. External runner (Azure DevOps agent) | Natural fit for CI | A second runtime to operate; the orchestration leaves Fabric |
+
+#### Decision point: under which identity dbt runs
+
+`dbt-fabric` supports `authentication: notebookutils`, which asks
+`notebookutils.credentials.getToken` for a token of whoever executes the
+notebook. When the notebook is run by hand, that is the developer.
+
+| | Now: developer's own identity | Target: technical identity |
+|---|---|---|
+| Warehouse auth | `notebookutils`, the executing user's Entra token | Service principal (`ActiveDirectoryServicePrincipal`) or Fabric workspace identity |
+| Azure DevOps auth | Personal PAT, scope *Code (Read)*, short expiry | Service principal or managed identity added to the Azure DevOps organisation, no PAT |
+| Trigger | Manual run of the notebook or the pipeline | Scheduled pipeline with a connection owned by the technical identity |
+| Risk | Stops when the person leaves, the PAT expires or a policy changes; every data change is audited under a personal name | Independent of people; least privilege; clear audit trail |
+| Fit | Development, training, manual demos | Test and production |
+
+The developer-identity setup is accepted for this exercise only. The proper
+solution is a technical identity, for four reasons:
+
+- the run must not depend on one person's account, password, MFA or
+  employment;
+- permissions can be scoped to the job (write only the dbt schemas, read only
+  the repository);
+- the audit log shows "the pipeline changed the data", not a developer;
+- nobody needs personal write access to production data.
+
+Note: when the notebook runs from a pipeline, the executing identity is
+defined by the pipeline (for example its last modifier), not necessarily by
+the person who clicked Run. Iteration O4 verifies this.
+
+#### Decision point: where the PAT comes from
+
+No Key Vault is available yet. The PAT is therefore passed as a notebook
+parameter at run time and is never saved in the notebook or the repository.
+The notebook code keeps a Key Vault branch (`notebookutils.credentials.getSecret`)
+as a placeholder. Switching to it is a configuration change, not a rewrite.
+
+**Best practices**
+
+1. Orchestrate tested artefacts; do not put new logic in the pipeline.
+2. Do not replace a validating load with a plain Copy activity.
+3. One run equals one batch, and the batch identifier flows between steps.
+4. Never store secrets in a notebook, a pipeline definition or Git. Prefer
+   Key Vault; give a PAT the minimum scope and a short expiry.
+5. Pin dbt and adapter versions to match local development.
+6. Keep `threads: 1` in every target, because Fabric Warehouse deadlocks on
+   parallel DDL (Iteration 59).
+7. Use a personal identity only for development; use a technical identity
+   for test and production.
+
+**Acceptance check:** every document step has a Fabric counterpart, and the
+run method, the run identity, the secret source and the target technical
+identity are recorded.
+
+### Iteration 62 (O2). Pass the batch identifier between steps
+
+**Goal:** in a pipeline run, the loader loads exactly the batch folder that
+the generator created in the same run.
+
+**Why:** with `p_batch_folder = ""` the loader picks the latest folder
+(`max(batch_folders)`). That is convenient by hand but unsafe in a pipeline: a
+concurrent run or a manual upload can create a newer folder, and a rerun is
+not guaranteed to load the same batch. Passing the folder explicitly makes the
+run deterministic and replayable.
+
+The loader's parameter cell was marked `# CELL` in the source file, not
+`# PARAMETERS CELL`. Fabric therefore did not treat it as a parameter cell,
+and a pipeline override of `p_batch_folder` would have been silently ignored.
+
+**1. Generator: return the folder name as the last cell**
+(`nb_generate_deterministic_sample_data`).
+
+```python
+# CELL ********************
+
+# Return the batch folder to the caller (pipeline: @activity('01_generate_data').output.result.exitValue).
+# Must stay the LAST cell: notebook.exit stops execution.
+notebookutils.notebook.exit(ingest_date)
+```
+
+**2. Loader: make the parameter cell a real parameter cell**
+(`nb_csv_load_source_to_ld`).
+
+```python
+# PARAMETERS CELL ********************
+
+# Parameters (pipelines override these; in the Fabric UI this shows as the "Parameters" cell).
+p_root_path = "Files/landing/oyster"
+p_batch_folder = ""   # "" = latest batch folder (manual runs only); pipelines always pass the generator's folder
+p_entities = ""       # "" = all entities; or comma-separated, e.g. "Customer,Account"
+p_debug = 0           # 1 = display a preview of each loaded table
+```
+
+**3. Loader: return a machine-readable summary as the last cell.**
+
+```python
+# CELL ********************
+
+import json
+
+# Machine-readable run summary for the pipeline (and the run history): which batch, how many rows per table.
+# Must stay the LAST cell: notebook.exit stops execution.
+summary = {
+    "batch_folder": batch_folder,
+    "batch_timestamp": batch_ts.isoformat(),
+    "load_timestamp": load_ts.isoformat(),
+    "row_counts": {e: spark.table(t).count() for e, (t, _) in prepared.items()},
+}
+print(json.dumps(summary, indent=2))
+notebookutils.notebook.exit(json.dumps(summary))
+```
+
+**4. Pipeline wiring** (configured in O3): the loader activity receives
+
+```text
+p_batch_folder = @activity('01_generate_data').output.result.exitValue
+```
+
+#### Decision points
+
+| Decision | Options | Choice |
+|---|---|---|
+| Who defines the batch identifier | a) the generator; b) the pipeline (`@formatDateTime(utcnow(),'yyyyMMddHHmmss')`) passed to both notebooks | **a)**: the generator already names the folder, as a real source system would. Option b) suits sources without a generator step, such as external uploads. |
+| Empty `p_batch_folder` | Latest folder, or an error | Keep "latest" for manual runs; the pipeline always passes a value |
+| Exit value format | Plain string or JSON | String for the generator (one value); JSON for the loader (summary, extensible) |
+
+**Best practices**
+
+1. Pass identifiers explicitly instead of relying on "latest"; this removes
+   race conditions and makes reruns replayable.
+2. Keep `notebook.exit` in the last cell, because it stops execution.
+3. Check the parameter cell marker in the source file, not only in the UI.
+4. End each run with a machine-readable summary (batch, row counts); it is
+   the basis for later anomaly checks.
+
+**Acceptance check:** a manual generator run exits with the folder name; a
+loader run with `p_batch_folder=<folder>` loads exactly that batch and exits
+with the JSON summary.
 
 ## What we deliberately have not implemented
 

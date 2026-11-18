@@ -27,11 +27,11 @@
 # META   "editable": false
 # META }
 
-# CELL ********************
+# PARAMETERS CELL ********************
 
-# Parameters (mark this cell in Fabric: ... -> Toggle parameter cell). Pipelines can override these.
+# Parameters (pipelines override these; in the Fabric UI this shows as the "Parameters" cell).
 p_root_path = "Files/landing/oyster"
-p_batch_folder = ""   # "" = latest batch folder; or e.g. "20261117075137" to reload a specific batch
+p_batch_folder = ""   # "" = latest batch folder (manual runs only); pipelines always pass the generator's folder
 p_entities = ""       # "" = all entities; or comma-separated, e.g. "Customer,Account"
 p_debug = 0           # 1 = display a preview of each loaded table
 
@@ -181,5 +181,27 @@ for file_prefix, (table_name, out) in prepared.items():
 
 # META {
 # META   "language": "sparksql",
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# CELL ********************
+
+import json
+
+# Machine-readable run summary for the pipeline (and the run history): which batch, how many rows per table.
+# Must stay the LAST cell: notebook.exit stops execution.
+summary = {
+    "batch_folder": batch_folder,
+    "batch_timestamp": batch_ts.isoformat(),
+    "load_timestamp": load_ts.isoformat(),
+    "row_counts": {e: spark.table(t).count() for e, (t, _) in prepared.items()},
+}
+print(json.dumps(summary, indent=2))
+notebookutils.notebook.exit(json.dumps(summary))
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
 # META   "language_group": "synapse_pyspark"
 # META }

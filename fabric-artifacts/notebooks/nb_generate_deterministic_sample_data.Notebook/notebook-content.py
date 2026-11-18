@@ -502,3 +502,16 @@ display(
 # META   "language": "python",
 # META   "language_group": "synapse_pyspark"
 # META }
+
+# CELL ********************
+
+# Return the batch folder to the caller (pipeline: @activity('01_generate_data').output.result.exitValue).
+# Must stay the LAST cell: notebook.exit stops execution.
+notebookutils.notebook.exit(ingest_date)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
