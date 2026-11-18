@@ -1,9 +1,9 @@
 with history as (
-    {% for entity, key in [
-        ('customer', 'customer_id'),
-        ('customer_address', 'address_id'),
-        ('account', 'account_id'),
-        ('debitcard', 'card_id')
+    {% for entity, key, staging_model in [
+        ('customer', 'customer_id', 'bis_dim_customer_staging'),
+        ('customer_address', 'address_id', 'bis_dim_customer_address_staging'),
+        ('account', 'account_id', 'bis_dim_account_staging'),
+        ('debitcard', 'card_id', 'bis_dim_debitcard_staging')
     ] %}
     select
         '{{ entity }}' as entity_name,
@@ -11,7 +11,7 @@ with history as (
         bronze_version_id,
         observed_valid_from,
         observed_valid_to
-    from {{ ref('stg_oys_' ~ entity) }}
+    from {{ ref(staging_model) }}
     {% if not loop.last %}union all{% endif %}
     {% endfor %}
 ),

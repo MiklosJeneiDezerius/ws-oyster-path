@@ -1,7 +1,7 @@
 version: 2
 
 models:
-  - name: stg_oys_customer
+  - name: bis_dim_customer_staging
     description: >
       Cleaned customer observations. Retains every Bronze version and tombstone;
       no joins or current-only filtering.
@@ -30,7 +30,7 @@ models:
         description: True/False mapped to bit; unrecognized or missing flags become NULL.
         data_tests: [not_null]
 
-  - name: stg_oys_customer_address
+  - name: bis_dim_customer_address_staging
     description: >
       Cleaned address observations, including all address types, historical
       versions, and tombstones. Address selection and customer denormalization
@@ -72,7 +72,7 @@ models:
         description: Parsed deletion bit; invalid flags become NULL.
         data_tests: [not_null]
 
-  - name: stg_oys_account
+  - name: bis_dim_account_staging
     description: >
       Cleaned account observations with full Bronze history and tombstones.
       Balance is preserved as a measure candidate, not designated an SCD2
@@ -108,7 +108,7 @@ models:
         description: Parsed deletion bit; invalid flags become NULL.
         data_tests: [not_null]
 
-  - name: stg_oys_debitcard
+  - name: bis_dim_debitcard_staging
     description: >
       Cleaned card observations with full Bronze history and tombstones.
       Source activity and deletion are separate flags.
@@ -145,7 +145,7 @@ models:
         description: Parsed deletion bit; invalid flags become NULL.
         data_tests: [not_null]
 
-  - name: stg_oys_transaction_ledger
+  - name: bis_fct_transaction_staging
     description: >
       Typed projection of accumulated immutable Bronze events. Retains raw IDs,
       conversion inputs, and ingestion metadata; no joins or event filtering.

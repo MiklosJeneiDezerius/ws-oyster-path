@@ -1,6 +1,6 @@
 select snapshot.snapshot_date, snapshot.account_id, snapshot.account_key
-from {{ ref('gold_fct_account_tier_daily_snapshot') }} as snapshot
-left join {{ ref('gold_dim_account') }} as accounts
+from {{ ref('g_fct_account_tier_daily_snapshot') }} as snapshot
+left join {{ ref('g_dim_account') }} as accounts
     on accounts.account_key = snapshot.account_key
 where accounts.account_key is null
    or accounts.account_id <> snapshot.account_id
@@ -16,8 +16,8 @@ where accounts.account_key is null
 union all
 
 select snapshot.snapshot_date, snapshot.account_id, snapshot.account_key
-from {{ ref('gold_fct_account_tier_daily_snapshot') }} as snapshot
-left join {{ ref('gold_dim_date') }} as dates
+from {{ ref('g_fct_account_tier_daily_snapshot') }} as snapshot
+left join {{ ref('g_dim_date') }} as dates
     on dates.date_key = snapshot.date_key
 where dates.date_key is null
    or dates.calendar_date <> snapshot.snapshot_date
@@ -25,10 +25,10 @@ where dates.date_key is null
 union all
 
 select snapshot.snapshot_date, snapshot.account_id, snapshot.account_key
-from {{ ref('gold_fct_account_tier_daily_snapshot') }} as snapshot
-left join {{ ref('gold_dim_account') }} as accounts
+from {{ ref('g_fct_account_tier_daily_snapshot') }} as snapshot
+left join {{ ref('g_dim_account') }} as accounts
     on accounts.account_key = snapshot.account_key
-left join {{ ref('gold_dim_customer') }} as customers
+left join {{ ref('g_dim_customer') }} as customers
     on customers.customer_key = snapshot.customer_key
 where accounts.account_key is not null
   and (
@@ -56,8 +56,8 @@ where accounts.account_key is not null
 union all
 
 select snapshot.snapshot_date, snapshot.account_id, snapshot.account_key
-from {{ ref('gold_fct_account_tier_daily_snapshot') }} as snapshot
-left join {{ ref('gold_dim_debitcard') }} as cards
+from {{ ref('g_fct_account_tier_daily_snapshot') }} as snapshot
+left join {{ ref('g_dim_debitcard') }} as cards
     on cards.debitcard_key = snapshot.debitcard_key
 where snapshot.debitcard_key is not null
   and (

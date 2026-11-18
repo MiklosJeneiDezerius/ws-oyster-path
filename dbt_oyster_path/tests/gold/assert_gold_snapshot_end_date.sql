@@ -5,6 +5,6 @@
 {% endif %}
 
 select min('snapshot end date does not match configured reporting date') as failure
-from {{ ref('gold_fct_account_tier_daily_snapshot') }}
+from {{ ref('g_fct_account_tier_daily_snapshot') }}
 having count(*) = 0
     or max(snapshot_date) <> cast('{{ snapshot_end_text }}' as date)

@@ -10,4 +10,4 @@ select
     is_inferred_start,
     is_current,
     is_deleted
-from {{ ref('dim_debitcard') }}
+from {{ ref('s_dim_debitcard') }}

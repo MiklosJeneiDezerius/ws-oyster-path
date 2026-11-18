@@ -1,8 +1,8 @@
 select facts.transaction_id
-from {{ ref('fct_transaction') }} as facts
-left join {{ ref('dim_account') }} as accounts
+from {{ ref('s_fct_transaction') }} as facts
+left join {{ ref('s_dim_account') }} as accounts
     on accounts.account_key = facts.account_key
-left join {{ ref('dim_customer') }} as customers
+left join {{ ref('s_dim_customer') }} as customers
     on customers.customer_key = facts.customer_key
 where (
     facts.account_key = 'UNKNOWN_ACCOUNT'
@@ -11,7 +11,7 @@ where (
         or facts.customer_key <> 'UNKNOWN_CUSTOMER'
         or exists (
             select 1
-            from {{ ref('dim_account') }} as eligible
+            from {{ ref('s_dim_account') }} as eligible
             where eligible.account_id = facts.account_id
               and eligible.is_unknown = 0
               and eligible.is_deleted = 0
@@ -38,7 +38,7 @@ or (
     facts.customer_key = 'UNKNOWN_CUSTOMER'
     and exists (
         select 1
-        from {{ ref('dim_customer') }} as eligible
+        from {{ ref('s_dim_customer') }} as eligible
         where eligible.customer_id = facts.customer_id
           and eligible.is_unknown = 0
           and eligible.is_deleted = 0

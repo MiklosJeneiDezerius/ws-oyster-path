@@ -5,11 +5,11 @@
 ] %}
 with source_rows as (
     select {{ columns | join(', ') }}
-    from {{ ref('stg_oys_transaction_ledger') }}
+    from {{ ref('bis_fct_transaction_staging') }}
 ),
 fact_rows as (
     select {{ columns | join(', ') }}
-    from {{ ref('fct_transaction') }}
+    from {{ ref('s_fct_transaction') }}
 ),
 missing_or_changed as (
     select * from source_rows

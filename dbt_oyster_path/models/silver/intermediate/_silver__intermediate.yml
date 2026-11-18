@@ -1,7 +1,7 @@
 version: 2
 
 models:
-  - name: int_customer_intervals
+  - name: bis_dim_customer_intervals
     description: >
       Candidate half-open customer observation intervals split at every customer
       and address history boundary. Includes customer tombstone coverage but
@@ -15,7 +15,7 @@ models:
       - name: valid_to
         description: Exclusive candidate interval end.
 
-  - name: int_customer_states
+  - name: bis_dim_customer_states
     description: >
       Customer attributes and separate Permanent, Mailing, and Billing address
       groups resolved at each candidate interval start. Missing or deleted

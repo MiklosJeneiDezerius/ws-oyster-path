@@ -15,4 +15,4 @@ select
     meta_batch_timestamp,
     meta_load_timestamp,
     meta_source_file
-from {{ ref('fct_transaction') }}
+from {{ ref('s_fct_transaction') }}

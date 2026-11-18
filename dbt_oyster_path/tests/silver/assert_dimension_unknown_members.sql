@@ -1,6 +1,6 @@
 {% for model, key, business_keys, reserved_key in [
-    ('dim_customer', 'customer_key', ['customer_id'], 'UNKNOWN_CUSTOMER'),
-    ('dim_account', 'account_key', ['account_id', 'customer_id'], 'UNKNOWN_ACCOUNT')
+    ('s_dim_customer', 'customer_key', ['customer_id'], 'UNKNOWN_CUSTOMER'),
+    ('s_dim_account', 'account_key', ['account_id', 'customer_id'], 'UNKNOWN_ACCOUNT')
 ] %}
 select min('{{ model }}: missing or duplicate Unknown') as failure
 from {{ ref(model) }}

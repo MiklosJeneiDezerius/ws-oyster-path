@@ -7,4 +7,4 @@ select
     day_of_month,
     iso_weekday,
     is_weekend
-from {{ ref('dim_date') }}
+from {{ ref('s_dim_date') }}

@@ -1,7 +1,7 @@
 {% set bounds = silver_calendar_bounds() %}
 
 select min('coverage') as failure
-from {{ ref('dim_date') }}
+from {{ ref('s_dim_date') }}
 having count(*) <> {{ bounds.days }}
     or count(distinct calendar_date) <> {{ bounds.days }}
     or min(calendar_date) <> cast('{{ bounds.start }}' as date)
@@ -10,7 +10,7 @@ having count(*) <> {{ bounds.days }}
 union all
 
 select 'attributes' as failure
-from {{ ref('dim_date') }}
+from {{ ref('s_dim_date') }}
 where date_key <> year(calendar_date)*10000 + month(calendar_date)*100 + day(calendar_date)
    or calendar_year <> year(calendar_date)
    or calendar_quarter <> datepart(quarter, calendar_date)

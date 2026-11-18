@@ -15,4 +15,4 @@ select
     meta_batch_timestamp,
     meta_load_timestamp,
     meta_source_file
-from {{ ref('bz_oys_customer') }}
+from {{ ref('b_oys_customer') }}

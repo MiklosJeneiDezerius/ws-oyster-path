@@ -6,7 +6,7 @@ with active_addresses as (
         bronze_version_id,
         observed_valid_from,
         observed_valid_to
-    from {{ ref('stg_oys_customer_address') }}
+    from {{ ref('bis_dim_customer_address_staging') }}
     where is_deleted = 0
 ),
 intervals as (

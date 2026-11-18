@@ -1,5 +1,5 @@
 snapshots:
-  - name: bz_oys_customer
+  - name: b_oys_customer
     description: >
       SCD2 history of landing.customer. One row per customer version;
       dbt_valid_from = source extract time (meta_batch_timestamp).
@@ -19,7 +19,7 @@ snapshots:
           - unique
           - not_null
 
-  - name: bz_oys_customer_address
+  - name: b_oys_customer_address
     description: SCD2 history of landing.customer_address.
     relation: source('landing', 'customer_address')
     config:
@@ -37,7 +37,7 @@ snapshots:
           - unique
           - not_null
 
-  - name: bz_oys_account
+  - name: b_oys_account
     description: SCD2 history of landing.account.
     relation: source('landing', 'account')
     config:
@@ -55,7 +55,7 @@ snapshots:
           - unique
           - not_null
 
-  - name: bz_oys_debitcard
+  - name: b_oys_debitcard
     description: SCD2 history of landing.debitcard.
     relation: source('landing', 'debitcard')
     config:

@@ -25,4 +25,4 @@ select
     is_current,
     is_deleted,
     is_unknown
-from {{ ref('dim_customer') }}
+from {{ ref('s_dim_customer') }}

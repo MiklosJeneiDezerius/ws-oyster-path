@@ -16,7 +16,7 @@ with previous_states as (
             partition by customer_id order by valid_from
         ) as previous_{{ attribute }}
         {% endfor %}
-    from {{ ref('int_customer_states') }}
+    from {{ ref('bis_dim_customer_states') }}
 ),
 changes as (
     select

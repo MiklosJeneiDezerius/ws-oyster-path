@@ -21,14 +21,14 @@ select
     , {{ prefix }}.{{ field }} as {{ prefix }}_{{ field }}
         {% endfor %}
     {% endfor %}
-from {{ ref('int_customer_intervals') }} as timeline
-inner join {{ ref('stg_oys_customer') }} as customer
+from {{ ref('bis_dim_customer_intervals') }} as timeline
+inner join {{ ref('bis_dim_customer_staging') }} as customer
     on customer.customer_id = timeline.customer_id
    and timeline.valid_from >= customer.observed_valid_from
    and timeline.valid_from < customer.observed_valid_to
 
 {% for prefix, address_type in address_types %}
-left join {{ ref('stg_oys_customer_address') }} as {{ prefix }}
+left join {{ ref('bis_dim_customer_address_staging') }} as {{ prefix }}
     on {{ prefix }}.customer_id = timeline.customer_id
    and {{ prefix }}.address_type = '{{ address_type }}'
    and {{ prefix }}.is_deleted = 0

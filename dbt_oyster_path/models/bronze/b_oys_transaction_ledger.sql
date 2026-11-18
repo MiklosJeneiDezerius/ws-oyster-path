@@ -3,7 +3,7 @@
     incremental_strategy='append',
     full_refresh=false,
     schema='bronze',
-    alias='bz_oys_transaction_ledger'
+    alias='b_oys_transaction_ledger'
 ) }}
 
 with source_transactions as (

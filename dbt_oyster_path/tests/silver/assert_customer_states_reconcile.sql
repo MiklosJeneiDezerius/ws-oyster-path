@@ -1,11 +1,11 @@
 with intervals as (
     select customer_id, valid_from, valid_to, 1 as expected_rows, 0 as actual_rows
-    from {{ ref('int_customer_intervals') }}
+    from {{ ref('bis_dim_customer_intervals') }}
 
     union all
 
     select customer_id, valid_from, valid_to, 0 as expected_rows, 1 as actual_rows
-    from {{ ref('int_customer_states') }}
+    from {{ ref('bis_dim_customer_states') }}
 )
 select
     customer_id,

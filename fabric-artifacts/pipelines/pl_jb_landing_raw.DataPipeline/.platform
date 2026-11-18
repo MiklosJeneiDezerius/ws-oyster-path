@@ -2,7 +2,7 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
   "metadata": {
     "type": "DataPipeline",
-    "displayName": "pl_Landing_Raw",
+    "displayName": "pl_jb_landing_raw",
     "description": "Step 1: generates the deterministic sample source files (CSV + JSON) into Files/landing/oyster/<batch>."
   },
   "config": {

@@ -4,4 +4,4 @@ select
     hour_number,
     minute_number,
     second_number
-from {{ ref('dim_time') }}
+from {{ ref('s_dim_time') }}

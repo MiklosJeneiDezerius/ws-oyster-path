@@ -2,22 +2,22 @@
 
 with boundaries as (
     select customer_id, observed_valid_from as boundary_at
-    from {{ ref('stg_oys_customer') }}
+    from {{ ref('bis_dim_customer_staging') }}
 
     union
 
     select customer_id, observed_valid_to
-    from {{ ref('stg_oys_customer') }}
+    from {{ ref('bis_dim_customer_staging') }}
 
     union
 
     select customer_id, observed_valid_from
-    from {{ ref('stg_oys_customer_address') }}
+    from {{ ref('bis_dim_customer_address_staging') }}
 
     union
 
     select customer_id, observed_valid_to
-    from {{ ref('stg_oys_customer_address') }}
+    from {{ ref('bis_dim_customer_address_staging') }}
 ),
 intervals as (
     select
@@ -37,7 +37,7 @@ from intervals
 where intervals.valid_to is not null
   and exists (
       select 1
-      from {{ ref('stg_oys_customer') }} as customer
+      from {{ ref('bis_dim_customer_staging') }} as customer
       where customer.customer_id = intervals.customer_id
         and intervals.valid_from >= customer.observed_valid_from
         and intervals.valid_from < customer.observed_valid_to

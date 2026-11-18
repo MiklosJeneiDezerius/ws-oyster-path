@@ -1,14 +1,10 @@
 select
-    AddressID as address_id_raw,
-    nullif(trim(AddressID), '') as address_id,
+    AccountID as account_id_raw,
+    nullif(trim(AccountID), '') as account_id,
     CustomerID as customer_id_raw,
     nullif(trim(CustomerID), '') as customer_id,
-    nullif(trim(AddressType), '') as address_type,
-    nullif(trim(Country), '') as country,
-    nullif(trim(PostalCode), '') as postal_code,
-    nullif(trim(City), '') as city,
-    nullif(trim(Street), '') as street,
-    nullif(trim(HouseNumber), '') as house_number,
+    Balance as balance_raw,
+    try_convert(decimal(18,2), nullif(trim(Balance), '')) as balance,
     dbt_scd_id as bronze_version_id,
     dbt_valid_from as observed_valid_from,
     dbt_valid_to as observed_valid_to,
@@ -21,4 +17,4 @@ select
     meta_batch_timestamp,
     meta_load_timestamp,
     meta_source_file
-from {{ ref('bz_oys_customer_address') }}
+from {{ ref('b_oys_account') }}

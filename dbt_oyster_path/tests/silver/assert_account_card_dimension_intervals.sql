@@ -5,13 +5,13 @@ with history as (
         account_key as version_key,
         valid_from,
         valid_to
-    from {{ ref('dim_account') }}
+    from {{ ref('s_dim_account') }}
     where is_unknown = 0
 
     union all
 
     select 'debitcard', card_id, debitcard_key, valid_from, valid_to
-    from {{ ref('dim_debitcard') }}
+    from {{ ref('s_dim_debitcard') }}
 ),
 intervals as (
     select

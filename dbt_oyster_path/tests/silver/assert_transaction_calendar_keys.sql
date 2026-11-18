@@ -1,5 +1,5 @@
 select transaction_id
-from {{ ref('fct_transaction') }}
+from {{ ref('s_fct_transaction') }}
 where date_key <>
     year(transaction_timestamp)*10000
     + month(transaction_timestamp)*100

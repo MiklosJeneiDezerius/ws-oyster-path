@@ -1,5 +1,5 @@
 {# Development-only reset for protected relations (e.g. full_refresh=false ledgers).
-   Usage: dbt run-operation dev_drop_relation --args '{schema: dev_bronze, identifier: bz_oys_transaction_ledger}' --target dev #}
+   Usage: dbt run-operation dev_drop_relation --args '{schema: dev_bronze, identifier: b_oys_transaction_ledger}' --target dev #}
 {% macro dev_drop_relation(schema, identifier) %}
     {% if target.name != 'dev' %}
         {{ exceptions.raise_compiler_error("dev_drop_relation is allowed only on target 'dev', got '" ~ target.name ~ "'.") }}

@@ -9,7 +9,7 @@ with intervals as (
             order by valid_from, customer_key
             rows between unbounded preceding and 1 preceding
         ) as previous_max_end
-    from {{ ref('dim_customer') }}
+    from {{ ref('s_dim_customer') }}
     where is_unknown = 0
 )
 select *

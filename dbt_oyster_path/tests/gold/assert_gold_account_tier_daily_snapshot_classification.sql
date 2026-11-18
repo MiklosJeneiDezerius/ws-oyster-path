@@ -11,7 +11,7 @@ select
     upgrade_candidate,
     downgrade_candidate,
     alignment_status
-from {{ ref('gold_fct_account_tier_daily_snapshot') }}
+from {{ ref('g_fct_account_tier_daily_snapshot') }}
 where calculated_spending_tier <> case
         when rolling_30_day_spend >= {{ platinum_threshold }} then 'Platinum'
         when rolling_30_day_spend >= {{ gold_threshold }} then 'Gold'

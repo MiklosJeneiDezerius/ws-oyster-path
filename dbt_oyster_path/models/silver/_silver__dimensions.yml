@@ -1,7 +1,7 @@
 version: 2
 
 models:
-  - name: dim_date
+  - name: s_dim_date
     description: >
       Static daily calendar with inclusive configurable bounds, independent
       of transaction activity. Monday is ISO weekday 1. No holidays, fiscal
@@ -28,7 +28,7 @@ models:
         description: Saturday or Sunday flag; not a business holiday calendar.
         data_tests: [not_null]
 
-  - name: dim_time
+  - name: s_dim_time
     description: >
       Static second-grain time-of-day dimension with exactly 86400 rows.
       Reusable across all dates. No timezone or daylight-saving interpretation
@@ -47,7 +47,7 @@ models:
       - name: second_number
         data_tests: [not_null]
 
-  - name: dim_customer
+  - name: s_dim_customer
     description: >
       Business SCD2 customer versions with Permanent, Mailing, and Billing
       address groups. Adjacent equal states are coalesced without bridging
@@ -99,7 +99,7 @@ models:
         description: Synthetic Unknown-member flag, not an observed business state.
         data_tests: [not_null]
 
-  - name: dim_account
+  - name: s_dim_account
     description: >
       Observed account SCD2 versions driven by customer ownership and deletion.
       Adjacent equal states are merged without bridging gaps. Balance remains
@@ -150,7 +150,7 @@ models:
         description: Synthetic Unknown-member flag, not an observed business state.
         data_tests: [not_null]
 
-  - name: dim_debitcard
+  - name: s_dim_debitcard
     description: >
       Observed card SCD2 versions driven by account, tier, activity, and deletion.
       Adjacent equal states are merged without bridging gaps. Requires passing

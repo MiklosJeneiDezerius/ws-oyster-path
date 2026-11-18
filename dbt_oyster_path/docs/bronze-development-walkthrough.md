@@ -18,17 +18,19 @@ consumer models and account-tier daily snapshot are implemented and built in
 development.
 
 **Status:** the development stack is built and tested end to end. Landing
-holds one complete `2026-11-18 07:20:24` batch, loaded during the
-orchestration test in Iteration 62 (102 customers, 194 addresses, 102
-accounts, 102 debit cards, 4,840 transactions). The Warehouse layers were
-built from the identical-content `2026-11-17 08:00:03` batch. Upstream checks passed
+holds the complete `2026-11-18 09:33:59` batch, loaded by the master pipeline
+in Iteration 63 (102 customers, 194 addresses, 102 accounts, 102 debit cards,
+4,840 transactions). The Warehouse layers were built from the
+identical-content `2026-11-17 08:00:03` batch. The dbt orchestration in
+Iteration 64 completed all 233 nodes successfully. Upstream checks passed
 27/27, the Silver build 129/129, and the Gold build 72/72. All 4,840
 transactions resolve to account and customer versions under the initial-load
 history policy (Iteration 56). The Gold daily snapshot covers 2026-10-09 to
 2026-11-09 with 102 accounts per day and reconciles exactly with an
 independent recalculation from Silver. The semantic model and report are
-designed (Iteration 60) but not yet created. Orchestration design has started
-(Part XI). Production builds have not been run.
+designed (Iteration 60) but not yet created. Orchestration O1-O4 is implemented
+and tested; retry/notification handling, scheduling, and semantic-model refresh
+remain follow-up work. Production builds have not been run.
 
 ## How to use this guide
 
@@ -42,6 +44,66 @@ intermediate states for learning; do not overwrite final files with them.
 Code blocks labelled as additions belong under the indicated YAML parent,
 not at the document root.
 
+For the team workflow from feature branch to production, see
+[Part XII: CI/CD with Azure DevOps and Fabric](#part-xii-cicd-with-azure-devops-and-fabric).
+
+## Using this project for a mixed-audience training
+
+The audience includes data engineers, software developers, credit-risk
+modellers, and people with SQL or software-engineering experience. Treat the
+project as one shared case study, not as a separate tool tutorial for each
+role. If possible, form mixed groups and rotate responsibilities: interpret
+the business question, inspect the data contract, implement or review a
+transformation, and explain the result. Participants with more Git or Fabric
+experience can support the group as reviewers without taking over the
+implementation.
+
+The training brief describes an on-premises SQL Server estate and a planned
+migration to Microsoft Fabric. This repository demonstrates Fabric using
+generated sample files; it does not connect to a real SQL Server, reproduce
+the bank's existing SSIS packages, or perform a production migration. Make
+that boundary explicit. Use the existing flow to discuss how familiar
+responsibilities map to the target platform: ingestion and file handling,
+Lakehouse and Warehouse storage, SQL/dbt transformations, Python/PySpark
+processing, and pipeline orchestration. Compare SSIS, ADF, or Airflow with
+Fabric only at the level of concepts and design choices; do not imply that
+their features or operational requirements are interchangeable.
+
+### A learning path through the case
+
+| Training focus | Use this project to explore | Questions to ask participants |
+|---|---|---|
+| From source data to analytics | Follow the destination flow below and the extraction, Landing, dbt, and orchestration parts. | What must be preserved when data arrives from different systems? Which assumptions belong at ingestion, and which belong in the analytical model? |
+| Data modelling and quality | Start with Iteration P1, then examine Landing contracts, typed Silver staging, dbt tests, and the end-to-end checks. | What is the grain of each table? Which keys and relationships must hold? What should happen when a required column, key, or batch is invalid? |
+| SQL, Python, and dbt | Compare the Spark loader's file/schema validation with the SQL transformations, dbt models, tests, and dependencies. | Is this operation primarily file-oriented processing, relational modelling, or orchestration? Where should its logic live, and how can the next person verify it? |
+| History and transaction analysis | Contrast the SCD2 snapshots for changing customer/account/card attributes with the append-only transaction ledger and the Silver star. | Why do transactions and changing descriptive attributes need different treatment? Which historical version should a transaction join to? |
+| Git and collaboration | Use a small documentation or test-description change to practise branch, commit, pull request, and review alongside the project work. | Can a reviewer understand what changed, why it changed, and what evidence shows it still works? |
+| Business consumption | Use the Gold account-tier daily snapshot and the semantic-model design discussion as a reporting brief. | What business question does each measure answer? What limitations should be visible to a stakeholder? |
+
+Participants report an overall proficiency of about 3/5, but Git familiarity
+varies substantially. Begin with a short check of SQL, Python, and Git
+experience, then keep one required path for everyone and offer stretch tasks
+for faster groups. For example, everyone can trace a key and run an existing
+test; participants ready for more can add a focused test, inspect model
+dependencies, or explain a historical join. Avoid spending the shared session
+on Python syntax basics when the more relevant learning is how PySpark fits
+beside SQL and dbt in a Fabric workflow.
+
+Use the credit-risk background to motivate questions, not to claim that this
+sample project implements a credit-risk model. Its generated entities and
+Gold snapshot support discussion of customer, account, card, and transaction
+history, but the project has no validated risk labels, policy rules, or
+production risk measures. Ask what additional governed data, definitions,
+controls, and validation a real risk use case would require. The semantic
+model and report are designed but not yet created, so treat report-building
+as a training activity or design exercise, not as an existing deliverable.
+
+By the end, each group should be able to explain one path from source delivery
+to an analytical result, justify at least one modelling or quality decision,
+identify where SQL/dbt and Python/PySpark each contribute, and complete a
+reviewable Git change. A successful outcome is understanding and repeatable
+engineering habits, not merely a green pipeline run.
+
 ### The destination
 
 ```text
@@ -49,11 +111,11 @@ CSV deliveries in Files/landing/oyster/<UTC batch folder>
     -> Spark loader: latest selected batch, all business values as strings
     -> lh_oyster_path.dbo.ld_oys_*
     -> dbt running against dw_oyster_path
-         -> dev_bronze.bz_oys_customer             snapshot
-         -> dev_bronze.bz_oys_customer_address     snapshot
-         -> dev_bronze.bz_oys_account              snapshot
-         -> dev_bronze.bz_oys_debitcard            snapshot
-         -> dev_bronze.bz_oys_transaction_ledger  incremental append
+         -> dev_bronze.b_oys_customer             snapshot
+         -> dev_bronze.b_oys_customer_address     snapshot
+         -> dev_bronze.b_oys_account              snapshot
+         -> dev_bronze.b_oys_debitcard            snapshot
+         -> dev_bronze.b_oys_transaction_ledger  incremental append
 ```
 
 In this exercise, “Bronze” means the Warehouse history layer after landing.
@@ -159,7 +221,7 @@ names from the exercise document.
 |---|---|
 | `lh_OysterLake` / `lh_Oysterlake` | `lh_oyster_path` |
 | `nb_GenerateOysterData` | `nb_generate_deterministic_sample_data` |
-| `pl_Landing_Raw` | Proposed extraction pipeline name; verify the workspace asset before referencing it |
+| `pl_jb_landing_raw` | Proposed extraction pipeline name; verify the workspace asset before referencing it |
 
 **Check:** the intended workspace has capacity and access, and
 `lh_oyster_path` is available. The generator notebook must be saved in that
@@ -189,7 +251,7 @@ as capturing every source-side change.
 ## Part 0. Day 3 - Extraction
 
 This section follows the document's **Day 3 - Extraction** sequence: save the
-generator, land raw files, orchestrate it through `pl_Landing_Raw`, validate the
+generator, land raw files, orchestrate it through `pl_jb_landing_raw`, validate the
 delivery, and load Landing Delta. It uses this repository's actual names rather
 than copying the document's older examples literally.
 
@@ -216,7 +278,7 @@ It is not a connector reading a real operational banking database.
 | nb_GenerateOysterData | nb_generate_deterministic_sample_data |
 | Files/landing/Oyster | Files/landing/oyster |
 | num_customers | CUSTOMER_COUNT |
-| pl_Landing_Raw | Proposed pipeline name from the document |
+| pl_jb_landing_raw | Proposed pipeline name from the document |
 
 **Why:** names and path casing must agree before the first read or write.
 Do not create a second Lakehouse or generator just to match an older label.
@@ -393,7 +455,7 @@ behind a pipeline. File presence alone is not a production completion protocol.
 
 In Fabric:
 
-1. Create a **Data pipeline** named `pl_Landing_Raw`.
+1. Create a **Data pipeline** named `pl_jb_landing_raw`.
 2. Add a **Notebook** activity, for example `Generate_raw_files`.
 3. In its settings, select the current workspace.
 4. Select `nb_generate_deterministic_sample_data`.
@@ -430,7 +492,7 @@ Never pass `num_customers` to code that only reads `CUSTOMER_COUNT`.
 
 ### Iteration E10. Save, run, monitor, and verify the raw delivery
 
-1. Save `pl_Landing_Raw`.
+1. Save `pl_jb_landing_raw`.
 2. Run it once.
 3. Follow the Notebook activity in the pipeline's output/monitoring view.
 4. Open notebook diagnostics if it fails; do not repeatedly submit new runs.
@@ -1447,7 +1509,7 @@ Create [the snapshot YAML](../snapshots/bronze/_bronze__snapshots.yml) initially
 
 ```yaml
 snapshots:
-  - name: bz_oys_customer
+  - name: b_oys_customer
     relation: source('landing', 'customer')
     config:
       unique_key: CustomerID
@@ -1533,7 +1595,7 @@ The resulting customer config is:
 
 ```yaml
 snapshots:
-  - name: bz_oys_customer
+  - name: b_oys_customer
     description: SCD2 observed history of landing.customer.
     relation: source('landing', 'customer')
     config:
@@ -1552,7 +1614,7 @@ It is not a complete physical copy of every row for every batch.
 Append to the same snapshot YAML:
 
 ```yaml
-  - name: bz_oys_customer_address
+  - name: b_oys_customer_address
     description: SCD2 history of landing.customer_address.
     relation: source('landing', 'customer_address')
     config:
@@ -1562,7 +1624,7 @@ Append to the same snapshot YAML:
       updated_at: meta_batch_timestamp
       hard_deletes: new_record
 
-  - name: bz_oys_account
+  - name: b_oys_account
     description: SCD2 history of landing.account.
     relation: source('landing', 'account')
     config:
@@ -1572,7 +1634,7 @@ Append to the same snapshot YAML:
       updated_at: meta_batch_timestamp
       hard_deletes: new_record
 
-  - name: bz_oys_debitcard
+  - name: b_oys_debitcard
     description: SCD2 history of landing.debitcard.
     relation: source('landing', 'debitcard')
     config:
@@ -1615,7 +1677,7 @@ assumption. New business events need globally stable, non-reused event IDs.
 
 ### Iteration 29. Add append with an existing-ID filter
 
-Create [bz_oys_transaction_ledger.sql](../models/bronze/bz_oys_transaction_ledger.sql).
+Create [b_oys_transaction_ledger.sql](../models/bronze/b_oys_transaction_ledger.sql).
 At this iteration its config does not yet include the later full-refresh guard:
 
 ```sql
@@ -1623,7 +1685,7 @@ At this iteration its config does not yet include the later full-refresh guard:
     materialized='incremental',
     incremental_strategy='append',
     schema='bronze',
-    alias='bz_oys_transaction_ledger'
+    alias='b_oys_transaction_ledger'
 ) }}
 
 with source_transactions as (
@@ -1674,7 +1736,7 @@ Create [assert_transaction_events_immutable.sql](../tests/bronze/assert_transact
 ```sql
 select incoming.TransactionID
 from {{ source('landing', 'transaction_ledger') }} as incoming
-inner join {{ ref('bz_oys_transaction_ledger') }} as stored
+inner join {{ ref('b_oys_transaction_ledger') }} as stored
     on incoming.TransactionID = stored.TransactionID
 where exists (
     select incoming.AccountID, incoming.Amount, incoming.[Timestamp]
@@ -1723,22 +1785,22 @@ Create [assert_bronze_current_keys_unique.sql](../tests/bronze/assert_bronze_cur
 ```sql
 with current_versions as (
     select 'customer' as entity_name, cast(CustomerID as varchar(8000)) as business_key
-    from {{ ref('bz_oys_customer') }}
+    from {{ ref('b_oys_customer') }}
     where dbt_valid_to = cast('9999-12-31' as datetime2(6))
 
     union all
     select 'customer_address', cast(AddressID as varchar(8000))
-    from {{ ref('bz_oys_customer_address') }}
+    from {{ ref('b_oys_customer_address') }}
     where dbt_valid_to = cast('9999-12-31' as datetime2(6))
 
     union all
     select 'account', cast(AccountID as varchar(8000))
-    from {{ ref('bz_oys_account') }}
+    from {{ ref('b_oys_account') }}
     where dbt_valid_to = cast('9999-12-31' as datetime2(6))
 
     union all
     select 'debitcard', cast(CardID as varchar(8000))
-    from {{ ref('bz_oys_debitcard') }}
+    from {{ ref('b_oys_debitcard') }}
     where dbt_valid_to = cast('9999-12-31' as datetime2(6))
 )
 select entity_name, business_key, count(*) as current_row_count
@@ -1761,7 +1823,7 @@ Create [the Bronze model YAML](../models/bronze/_bronze__models.yml):
 version: 2
 
 models:
-  - name: bz_oys_transaction_ledger
+  - name: b_oys_transaction_ledger
     description: Append-only transaction events captured from landing.
     columns:
       - name: TransactionID
@@ -1791,7 +1853,7 @@ From the project directory, execute each command separately and stop on failure:
 ..\.venv\Scripts\dbt.exe source freshness --profiles-dir .
 ..\.venv\Scripts\dbt.exe test --select source:landing assert_landing_single_batch --profiles-dir .
 ..\.venv\Scripts\dbt.exe snapshot --profiles-dir .
-..\.venv\Scripts\dbt.exe run --select bz_oys_transaction_ledger --profiles-dir .
+..\.venv\Scripts\dbt.exe run --select b_oys_transaction_ledger --profiles-dir .
 ..\.venv\Scripts\dbt.exe test --profiles-dir .
 ```
 
@@ -1827,12 +1889,12 @@ In the Warehouse SQL editor, for a dev target:
 ```sql
 select CustomerID, FirstName, LastName,
        meta_batch_timestamp, dbt_valid_from, dbt_valid_to, dbt_is_deleted
-from dev_bronze.bz_oys_customer
+from dev_bronze.b_oys_customer
 order by CustomerID, dbt_valid_from;
 
 select count(*) as row_count,
        count(distinct TransactionID) as distinct_ids
-from dev_bronze.bz_oys_transaction_ledger;
+from dev_bronze.b_oys_transaction_ledger;
 ```
 
 Use `bronze` instead of `dev_bronze` only when intentionally inspecting prod.
@@ -1850,19 +1912,19 @@ counts in the dev Warehouse SQL editor:
 
 ```sql
 select 'customer' as entity, count(*) as stored_rows
-from dev_bronze.bz_oys_customer
+from dev_bronze.b_oys_customer
 union all
 select 'customer_address', count(*)
-from dev_bronze.bz_oys_customer_address
+from dev_bronze.b_oys_customer_address
 union all
 select 'account', count(*)
-from dev_bronze.bz_oys_account
+from dev_bronze.b_oys_account
 union all
 select 'debitcard', count(*)
-from dev_bronze.bz_oys_debitcard
+from dev_bronze.b_oys_debitcard
 union all
 select 'transaction_ledger', count(*)
-from dev_bronze.bz_oys_transaction_ledger;
+from dev_bronze.b_oys_transaction_ledger;
 ```
 
 These are total stored rows, including historical snapshot versions, not only
@@ -1877,7 +1939,7 @@ these commands from the dbt project directory, one at a time, stopping on failur
 ..\.venv\Scripts\dbt.exe test --select source:landing assert_landing_single_batch --profiles-dir .
 ..\.venv\Scripts\dbt.exe test --select assert_transaction_events_immutable --profiles-dir .
 ..\.venv\Scripts\dbt.exe snapshot --profiles-dir .
-..\.venv\Scripts\dbt.exe run --select bz_oys_transaction_ledger --profiles-dir .
+..\.venv\Scripts\dbt.exe run --select b_oys_transaction_ledger --profiles-dir .
 ..\.venv\Scripts\dbt.exe test --profiles-dir .
 ```
 
@@ -1916,7 +1978,7 @@ Inspect the deliberately changed customer in the Warehouse:
 ```sql
 select CustomerID, FirstName, LastName,
        dbt_valid_from, dbt_valid_to, dbt_is_deleted
-from dev_bronze.bz_oys_customer
+from dev_bronze.b_oys_customer
 where CustomerID = '1001'
 order by dbt_valid_from;
 ```
@@ -1928,7 +1990,7 @@ Inspect the moved addresses the same way:
 ```sql
 select AddressID, CustomerID, PostalCode, City, Street, HouseNumber,
        dbt_valid_from, dbt_valid_to, dbt_is_deleted
-from dev_bronze.bz_oys_customer_address
+from dev_bronze.b_oys_customer_address
 where AddressID in ('3193', '3194')
 order by AddressID, dbt_valid_from;
 ```
@@ -1973,7 +2035,7 @@ Record the ledger count. Run the loader and landing validation, then:
 
 ```powershell
 ..\.venv\Scripts\dbt.exe test --select assert_transaction_events_immutable --profiles-dir .
-..\.venv\Scripts\dbt.exe run --select bz_oys_transaction_ledger --profiles-dir .
+..\.venv\Scripts\dbt.exe run --select b_oys_transaction_ledger --profiles-dir .
 ```
 
 Stop if either command fails. The ledger count should increase by exactly one.
@@ -2008,12 +2070,12 @@ The proposed star has one transaction fact row per `TransactionID`:
 
 | Model | Intended grain and responsibility |
 |---|---|
-| dim_customer | One business version of a customer, including selected address attributes |
-| dim_account | One business version of an account's descriptive attributes |
-| dim_debitcard | One business version of a card |
-| dim_date | One calendar date |
-| dim_time | One second of the day, reusable across dates |
-| fct_transaction | One immutable transaction event with applicable dimension keys |
+| s_dim_customer | One business version of a customer, including selected address attributes |
+| s_dim_account | One business version of an account's descriptive attributes |
+| s_dim_debitcard | One business version of a card |
+| s_dim_date | One calendar date |
+| s_dim_time | One second of the day, reusable across dates |
+| s_fct_transaction | One immutable transaction event with applicable dimension keys |
 
 These are planned models, not tables already created by this documentation.
 Use separate date and time dimensions, retaining the complete transaction
@@ -2095,11 +2157,11 @@ in [the staging YAML](../models/silver/staging/_silver__staging.yml):
 
 | Model | Typed/normalized business fields |
 |---|---|
-| [stg_oys_customer](../models/silver/staging/stg_oys_customer.sql) | customer_id, first_name, last_name |
-| [stg_oys_customer_address](../models/silver/staging/stg_oys_customer_address.sql) | address_id, customer_id, address_type, country, postal_code, city, street, house_number |
-| [stg_oys_account](../models/silver/staging/stg_oys_account.sql) | account_id, customer_id, balance |
-| [stg_oys_debitcard](../models/silver/staging/stg_oys_debitcard.sql) | card_id, account_id, card_tier, is_active |
-| [stg_oys_transaction_ledger](../models/silver/staging/stg_oys_transaction_ledger.sql) | transaction_id, account_id, amount, transaction_timestamp |
+| [bis_dim_customer_staging](../models/silver/staging/bis_dim_customer_staging.sql) | customer_id, first_name, last_name |
+| [bis_dim_customer_address_staging](../models/silver/staging/bis_dim_customer_address_staging.sql) | address_id, customer_id, address_type, country, postal_code, city, street, house_number |
+| [bis_dim_account_staging](../models/silver/staging/bis_dim_account_staging.sql) | account_id, customer_id, balance |
+| [bis_dim_debitcard_staging](../models/silver/staging/bis_dim_debitcard_staging.sql) | card_id, account_id, card_tier, is_active |
+| [bis_fct_transaction_staging](../models/silver/staging/bis_fct_transaction_staging.sql) | transaction_id, account_id, amount, transaction_timestamp |
 
 This is one iteration because all five apply the same staging responsibility:
 rename, normalize, convert, and preserve lineage without joining or filtering.
@@ -2162,7 +2224,7 @@ select
     meta_batch_timestamp,
     meta_load_timestamp,
     meta_source_file
-from {{ ref('bz_oys_transaction_ledger') }}
+from {{ ref('b_oys_transaction_ledger') }}
 ```
 
 Balance uses the same decimal conversion. Invalid conversions produce NULL,
@@ -2288,7 +2350,7 @@ Parsing or test discovery is not evidence that these data checks passed live.
 ### Iteration 43. Establish the address contract before denormalization
 
 **Approved dimension layout:** include Permanent, Mailing, and Billing address
-attributes as three separate column groups in `dim_customer`. An absent type
+attributes as three separate column groups in `s_dim_customer`. An absent type
 remains NULL; do not silently substitute another address type.
 
 ```text
@@ -2351,7 +2413,7 @@ customer SCD2 version; load-metadata-only differences must not.
 
 ### Iteration 44. Construct the customer history timeline
 
-Create [int_customer_intervals](../models/silver/intermediate/int_customer_intervals.sql)
+Create [bis_dim_customer_intervals](../models/silver/intermediate/bis_dim_customer_intervals.sql)
 as a view. Before joining attributes, combine boundary dates from both histories:
 
 ```sql
@@ -2359,16 +2421,16 @@ as a view. Before joining attributes, combine boundary dates from both histories
 
 with boundaries as (
     select customer_id, observed_valid_from as boundary_at
-    from {{ ref('stg_oys_customer') }}
+    from {{ ref('bis_dim_customer_staging') }}
     union
     select customer_id, observed_valid_to
-    from {{ ref('stg_oys_customer') }}
+    from {{ ref('bis_dim_customer_staging') }}
     union
     select customer_id, observed_valid_from
-    from {{ ref('stg_oys_customer_address') }}
+    from {{ ref('bis_dim_customer_address_staging') }}
     union
     select customer_id, observed_valid_to
-    from {{ ref('stg_oys_customer_address') }}
+    from {{ ref('bis_dim_customer_address_staging') }}
 ),
 intervals as (
     select
@@ -2384,7 +2446,7 @@ from intervals
 where intervals.valid_to is not null
   and exists (
       select 1
-      from {{ ref('stg_oys_customer') }} as customer
+      from {{ ref('bis_dim_customer_staging') }} as customer
       where customer.customer_id = intervals.customer_id
         and intervals.valid_from >= customer.observed_valid_from
         and intervals.valid_from < customer.observed_valid_to
@@ -2409,7 +2471,7 @@ must pass. The view constructs boundaries; it does not repair invalid histories
 or choose between overlapping address versions.
 
 ```powershell
-..\.venv\Scripts\dbt.exe run --select int_customer_intervals --profiles-dir .
+..\.venv\Scripts\dbt.exe run --select bis_dim_customer_intervals --profiles-dir .
 ```
 
 Run on the approved Fabric network after the staging views exist.
@@ -2419,13 +2481,13 @@ Local fixture verification is not a substitute for live Fabric SQL validation.
 
 ### Iteration 45. Resolve customer attributes and all three address groups
 
-Create [int_customer_states](../models/silver/intermediate/int_customer_states.sql)
+Create [bis_dim_customer_states](../models/silver/intermediate/bis_dim_customer_states.sql)
 as a view over the candidate timeline. Keep one state per customer and interval.
 The model uses Jinja to apply this address join identically to Permanent,
 Mailing, and Billing:
 
 ```sql
-left join {{ ref('stg_oys_customer_address') }} as permanent
+left join {{ ref('bis_dim_customer_address_staging') }} as permanent
     on permanent.customer_id = timeline.customer_id
    and permanent.address_type = 'Permanent'
    and permanent.is_deleted = 0
@@ -2472,7 +2534,7 @@ every `(customer_id, valid_from, valid_to)`, detecting lost, multiplied, extra,
 or altered intervals.
 
 ```powershell
-..\.venv\Scripts\dbt.exe run --select int_customer_states --profiles-dir .
+..\.venv\Scripts\dbt.exe run --select bis_dim_customer_states --profiles-dir .
 ..\.venv\Scripts\dbt.exe test --select assert_customer_states_unique assert_customer_states_reconcile --profiles-dir .
 ```
 
@@ -2485,7 +2547,7 @@ version keys. This intermediate view is not yet the final SCD2 dimension.
 
 ### Iteration 46. Materialize the customer business SCD2 dimension
 
-Create [dim_customer](../models/silver/dim_customer.sql), inheriting Silver's
+Create [s_dim_customer](../models/silver/s_dim_customer.sql), inheriting Silver's
 table materialization. It contains customer names, all three address groups,
 `customer_id`, `customer_key`, `valid_from`, `valid_to`, `is_current`, and
 `is_deleted`. No unknown member is introduced yet.
@@ -2543,8 +2605,8 @@ Run all upstream history/address/state validations first. After their views
 exist and tests pass, execute:
 
 ```powershell
-..\.venv\Scripts\dbt.exe run --select dim_customer --profiles-dir .
-..\.venv\Scripts\dbt.exe test --select dim_customer --profiles-dir .
+..\.venv\Scripts\dbt.exe run --select s_dim_customer --profiles-dir .
+..\.venv\Scripts\dbt.exe test --select s_dim_customer --profiles-dir .
 ```
 
 **Expected:** nine customer dimension tests pass. Local fixture checks cover
@@ -2554,14 +2616,14 @@ table creation, and live data tests still require a Fabric-connected run.
 
 ### Iteration 47. Apply business SCD2 to accounts and debit cards
 
-Create [dim_account](../models/silver/dim_account.sql) and
-[dim_debitcard](../models/silver/dim_debitcard.sql). These are rebuilt Silver
+Create [s_dim_account](../models/silver/s_dim_account.sql) and
+[s_dim_debitcard](../models/silver/s_dim_debitcard.sql). These are rebuilt Silver
 tables derived from complete Bronze observation histories, not new snapshots.
 
 | Model | Business key | Attributes defining versions |
 |---|---|---|
-| dim_account | account_id | customer_id, is_deleted |
-| dim_debitcard | card_id | account_id, card_tier, is_active, is_deleted |
+| s_dim_account | account_id | customer_id, is_deleted |
+| s_dim_debitcard | card_id | account_id, card_tier, is_active, is_deleted |
 
 **Why exclude balance:** money is a measure rather than an account description.
 A balance-only change in Bronze must not create another account dimension
@@ -2574,7 +2636,7 @@ to staging observation intervals:
 
 ```sql
 {{ coalesce_observed_dimension(
-    relation=ref('stg_oys_account'),
+    relation=ref('bis_dim_account_staging'),
     business_key='account_id',
     version_key='account_key',
     attributes=['customer_id', 'is_deleted']
@@ -2583,7 +2645,7 @@ to staging observation intervals:
 
 ```sql
 {{ coalesce_observed_dimension(
-    relation=ref('stg_oys_debitcard'),
+    relation=ref('bis_dim_debitcard_staging'),
     business_key='card_id',
     version_key='debitcard_key',
     attributes=['account_id', 'card_tier', 'is_active', 'is_deleted']
@@ -2623,8 +2685,8 @@ tests, partitioning by entity and normalized business key.
 After staging validation passes and its views exist:
 
 ```powershell
-..\.venv\Scripts\dbt.exe run --select dim_account dim_debitcard --profiles-dir .
-..\.venv\Scripts\dbt.exe test --select dim_account dim_debitcard --profiles-dir .
+..\.venv\Scripts\dbt.exe run --select s_dim_account s_dim_debitcard --profiles-dir .
+..\.venv\Scripts\dbt.exe test --select s_dim_account s_dim_debitcard --profiles-dir .
 ```
 
 **Expected:** 19 new dimension tests pass. Locally check balance-only changes,
@@ -2634,14 +2696,14 @@ live table creation still require the authenticated Fabric-connected run.
 
 ### Iteration 48. Add date and time-of-day reference dimensions
 
-Create [dim_date](../models/silver/dim_date.sql) and
-[dim_time](../models/silver/dim_time.sql) as Silver tables.
+Create [s_dim_date](../models/silver/s_dim_date.sql) and
+[s_dim_time](../models/silver/s_dim_time.sql) as Silver tables.
 These are static reference dimensions, not SCD2 histories.
 
 | Model | Grain | Key |
 |---|---|---|
-| dim_date | One calendar day | Integer YYYYMMDD |
-| dim_time | One second of the day | Integer seconds since midnight, 0-86399 |
+| s_dim_date | One calendar day | Integer YYYYMMDD |
+| s_dim_time | One second of the day | Integer seconds since midnight, 0-86399 |
 
 Add these project variables:
 
@@ -2683,8 +2745,8 @@ coverage, extrema, and key/attribute consistency. The calendar count, distinct
 date count, and inclusive extrema together enforce contiguous daily coverage.
 
 ```powershell
-..\.venv\Scripts\dbt.exe run --select dim_date dim_time --profiles-dir .
-..\.venv\Scripts\dbt.exe test --select dim_date dim_time --profiles-dir .
+..\.venv\Scripts\dbt.exe run --select s_dim_date s_dim_time --profiles-dir .
+..\.venv\Scripts\dbt.exe test --select s_dim_date s_dim_time --profiles-dir .
 ```
 
 **Expected:** 19 tests pass. Unknown members and fact lookups are not introduced
@@ -2720,8 +2782,8 @@ not make that assumption. Initial reports can therefore legitimately contain
 many Unknown transactions. Their amounts must still be retained and reconciled.
 
 **Implemented in this iteration:** add one synthetic row to each of
-[dim_customer](../models/silver/dim_customer.sql) and
-[dim_account](../models/silver/dim_account.sql):
+[s_dim_customer](../models/silver/s_dim_customer.sql) and
+[s_dim_account](../models/silver/s_dim_account.sql):
 
 | Attribute | Unknown customer | Unknown account |
 |---|---|---|
@@ -2743,7 +2805,7 @@ The shared account/card coalescing macro accepts an optional `unknown_key`:
 
 ```sql
 {{ coalesce_observed_dimension(
-    relation=ref('stg_oys_account'),
+    relation=ref('bis_dim_account_staging'),
     business_key='account_id',
     version_key='account_key',
     attributes=['customer_id', 'is_deleted'],
@@ -2774,8 +2836,8 @@ deletion status, expected technical boundaries, and no observed reserved-key use
 After rebuilding customer/account (and with existing card available):
 
 ```powershell
-..\.venv\Scripts\dbt.exe run --select dim_customer dim_account --profiles-dir .
-..\.venv\Scripts\dbt.exe test --select dim_customer dim_account --profiles-dir .
+..\.venv\Scripts\dbt.exe run --select s_dim_customer s_dim_account --profiles-dir .
+..\.venv\Scripts\dbt.exe test --select s_dim_customer s_dim_account --profiles-dir .
 ```
 
 **Acceptance:** one additional synthetic row per affected dimension; existing
@@ -2801,7 +2863,7 @@ of those lookups or error gates.
 
 **Grain:** one immutable source `TransactionID` per row. The ID is a degenerate
 dimension; there is no need to invent another transaction surrogate key.
-[fct_transaction](../models/silver/fct_transaction.sql) inherits Silver's
+[s_fct_transaction](../models/silver/s_fct_transaction.sql) inherits Silver's
 `table` materialization, not incremental append. Bronze retains immutable events;
 Silver rebuilds their dimensional attribution when new history becomes available.
 This avoids permanently freezing an early Unknown assignment.
@@ -2825,8 +2887,8 @@ with account_lookup as (
         transactions.*,
         accounts.account_key,
         accounts.customer_id
-    from {{ ref('stg_oys_transaction_ledger') }} as transactions
-    left join {{ ref('dim_account') }} as accounts
+    from {{ ref('bis_fct_transaction_staging') }} as transactions
+    left join {{ ref('s_dim_account') }} as accounts
         on accounts.account_id = transactions.account_id
        and accounts.is_unknown = 0
        and accounts.is_deleted = 0
@@ -2896,7 +2958,7 @@ select
     customer_lookup_status,
     count_big(*) as transaction_count,
     sum(cast(amount as decimal(38,2))) as signed_amount
-from dev_silver.fct_transaction
+from dev_silver.s_fct_transaction
 group by account_lookup_status, customer_lookup_status;
 ```
 
@@ -2906,7 +2968,7 @@ production). No arbitrary Unknown-rate threshold has been invented.
 **Build/acceptance sequence** (requires reachable authenticated Fabric):
 
 ```powershell
-..\.venv\Scripts\dbt.exe build --select +fct_transaction --profiles-dir .
+..\.venv\Scripts\dbt.exe build --select +s_fct_transaction --profiles-dir .
 ..\.venv\Scripts\dbt.exe test --select path:tests/silver --profiles-dir .
 ```
 
@@ -2935,7 +2997,7 @@ decimal arithmetic/adapter deployment.
 
 ### Iteration 51. Make Silver acceptance repeatable
 
-**Reason:** `+fct_transaction` selects its ancestors, including mutable Bronze
+**Reason:** `+s_fct_transaction` selects its ancestors, including mutable Bronze
 resources, but does not include the independent card dimension. A Silver-only
 acceptance run should be explicit about what it reads and writes.
 
@@ -3071,7 +3133,7 @@ violations.
 | Result | Live evidence |
 |---|---|
 | Eight passes | Unique/non-null business IDs for Landing customer, account, debit card, and transaction ledger |
-| 16 errors | The five expected `dw_oyster_path.dev_bronze.bz_oys_*` relations could not be resolved |
+| 16 errors | The five expected `dw_oyster_path.dev_bronze.b_oys_*` relations could not be resolved |
 | Two errors | `lh_oyster_path.dbo.ld_oys_customeraddress` could not be resolved |
 | One error | The mixed-batch test could not resolve `meta_batch_timestamp` |
 
@@ -3137,12 +3199,12 @@ date, and time dimensions, plus the transaction fact:
 
 | Gold model | Grain/purpose |
 |---|---|
-| `gold_dim_customer` | Silver customer SCD2 versions for consumption |
-| `gold_dim_account` | Silver account SCD2 versions for consumption |
-| `gold_dim_debitcard` | Silver debit-card SCD2 versions for consumption |
-| `gold_dim_date`, `gold_dim_time` | Shared reporting calendar and clock |
-| `gold_fct_transaction` | One row per source transaction |
-| `gold_fct_account_tier_daily_snapshot` | One row per active account and snapshot date |
+| `g_dim_customer` | Silver customer SCD2 versions for consumption |
+| `g_dim_account` | Silver account SCD2 versions for consumption |
+| `g_dim_debitcard` | Silver debit-card SCD2 versions for consumption |
+| `g_dim_date`, `g_dim_time` | Shared reporting calendar and clock |
+| `g_fct_transaction` | One row per source transaction |
+| `g_fct_account_tier_daily_snapshot` | One row per active account and snapshot date |
 
 Explicit column lists are intentional: they stabilize the reporting contract
 and prevent an upstream schema addition from silently changing the Gold
@@ -3337,7 +3399,7 @@ vars:
 ```
 
 **Change 3 — apply it in both dimension builders**
-(`coalesce_observed_dimension` for account/card, and `dim_customer`):
+(`coalesce_observed_dimension` for account/card, and `s_dim_customer`):
 
 ```sql
     {{ inferred_valid_from('versions') }} as valid_from,
@@ -3405,8 +3467,8 @@ Two guards (target name and `dev_` schema prefix) make an accidental
 production drop a compile error.
 
 ```powershell
-& '..\.venv\Scripts\dbt.exe' run-operation dev_drop_relation --args "{schema: dev_bronze, identifier: bz_oys_transaction_ledger}" --target dev --profiles-dir .
-& '..\.venv\Scripts\dbt.exe' run --select bz_oys_transaction_ledger --target dev --profiles-dir .
+& '..\.venv\Scripts\dbt.exe' run-operation dev_drop_relation --args "{schema: dev_bronze, identifier: b_oys_transaction_ledger}" --target dev --profiles-dir .
+& '..\.venv\Scripts\dbt.exe' run --select b_oys_transaction_ledger --target dev --profiles-dir .
 ```
 
 **Acceptance:** the ledger is rebuilt with 4,840 rows and all three metadata
@@ -3431,7 +3493,7 @@ dimension stops its dependants.
 |---|---|
 | Silver build | 129/129 passed |
 | Gold build | 72/72 passed |
-| `fct_transaction` lookup status | 4,840 `matched` / `matched` |
+| `s_fct_transaction` lookup status | 4,840 `matched` / `matched` |
 | Inferred first versions | 102 account, 102 customer, 102 card |
 | Daily snapshot span | 2026-10-09 to 2026-11-09, 32 days |
 | Accounts per snapshot day | 102 on every day (3,264 rows) |
@@ -3455,13 +3517,13 @@ directly from Silver, outside the Gold model logic, and compare:
 ```sql
 with ref_spend as (
   select account_id, sum(cast(amount as decimal(38,4))) as spend
-  from dev_silver.fct_transaction
+  from dev_silver.s_fct_transaction
   where transaction_timestamp >= '2026-10-11'
     and transaction_timestamp <  '2026-11-10'
   group by account_id
 ), g as (
   select account_id, rolling_30_day_spend, calculated_spending_tier
-  from dev_gold.gold_fct_account_tier_daily_snapshot
+  from dev_gold.g_fct_account_tier_daily_snapshot
   where snapshot_date = '2026-11-09'
 )
 select count(*) as accounts,
@@ -3546,15 +3608,15 @@ aggregation of a snapshot fact.
 
 | Model table | Source (`dev_gold`) | Role |
 |---|---|---|
-| **Account Tier Snapshot** | `gold_fct_account_tier_daily_snapshot` | Main fact; grain: account × day |
-| Account | `gold_dim_account` | SCD2 dimension |
-| Customer | `gold_dim_customer` | SCD2 dimension |
-| Debit Card | `gold_dim_debitcard` | SCD2 dimension |
-| Date | `gold_dim_date` | Date table (Mark as date table on `calendar_date`) |
-| *(optional)* Transaction, Time | `gold_fct_transaction`, `gold_dim_time` | Later transaction drill-down page |
+| **Account Tier Snapshot** | `g_fct_account_tier_daily_snapshot` | Main fact; grain: account × day |
+| Account | `g_dim_account` | SCD2 dimension |
+| Customer | `g_dim_customer` | SCD2 dimension |
+| Debit Card | `g_dim_debitcard` | SCD2 dimension |
+| Date | `g_dim_date` | Date table (Mark as date table on `calendar_date`) |
+| *(optional)* Transaction, Time | `g_fct_transaction`, `g_dim_time` | Later transaction drill-down page |
 
 The document's `gold_fact_periodic_spend_snapshot` corresponds to our
-`gold_fct_account_tier_daily_snapshot`: the purpose-made table without
+`g_fct_account_tier_daily_snapshot`: the purpose-made table without
 aggregate metrics. Aggregation happens in the measures.
 
 **Relationships** (all one-to-many, single direction, dimension filters fact):
@@ -3751,30 +3813,36 @@ pl_master_orchestration  (triggered manually)
                                                                                          (sm_reporting)
 ```
 
-Iteration 63 (O3) refines this into one pipeline per layer and a master
-(`pl_Master`) that chains the layer pipelines, the dbt/DW build, and the
-semantic model refresh.
+Iteration 63 (O3) creates one pipeline per layer and `pl_Master_Core`.
+Iteration 64 (O4) adds its dbt/DW child pipeline. A semantic-model refresh
+after the DW build remains planned follow-up work; it is not in the current
+master definition.
 
 `nb_run_dbt` performs these steps:
 
 1. Install pinned versions, `dbt-core==1.12.6` and `dbt-fabric==1.12.0`,
    matching the local environment.
-2. Read the Azure DevOps personal access token (PAT).
+2. Read the Azure DevOps token passed at run time. For the verified run this
+   was a short-lived PAT with *Code: Read* scope.
 3. Shallow-clone `main` from
-   `https://dev.azure.com/pulze-azure-devops/Oyster/_git/Oyster`. The PAT
+   `https://dev.azure.com/pulze-azure-devops/Oyster/_git/Oyster`. The token
    travels only in an HTTP header; it is never put in the URL or printed.
 4. Refresh the Lakehouse SQL endpoint metadata through the Fabric
    `refreshMetadata` API. This makes the latest Landing Delta versions visible
    to dbt sources; it is a metadata refresh, not a separate DW refresh.
-5. Run `dbt build` against a dedicated `fabric_notebook` target with
-   `authentication: notebookutils` and `threads: 1`.
+5. Generate a temporary dbt profile from the checked-in `profiles.yml`.
+   A small `TokenCredential` implementation supplies the SQL access token
+   acquired from `notebookutils.credentials.getToken` to the dbt subprocess
+   through the adapter's `token_credential` authentication mode. Run
+   `dbt build` against the `dev` target with `threads: 1`.
 6. Copy the run results and dbt log to Lakehouse Files as run artefacts.
 7. Raise an exception when dbt fails, so the pipeline activity fails.
 
 The dbt `build` creates or updates the Warehouse objects and data; there is no
-separate DW refresh step. In `pl_Master`, the Semantic model refresh
-activity runs only after `DW create and test` succeeds, waits for completion,
-and refreshes the full `sm_reporting` model. See Microsoft's
+separate DW refresh step. A semantic-model refresh should be added after
+`DW create and test` succeeds, and should wait for the full refresh to
+complete. This is a follow-up iteration, not part of the current pipeline.
+See Microsoft's
 [Semantic model refresh activity documentation](https://learn.microsoft.com/en-us/fabric/data-factory/semantic-model-refresh-activity).
 
 #### Decision point: which run method
@@ -3787,15 +3855,17 @@ and refreshes the full `sm_reporting` model. See Microsoft's
 
 #### Decision point: under which identity dbt runs
 
-`dbt-fabric` supports `authentication: notebookutils`, which asks
-`notebookutils.credentials.getToken` for a token of whoever executes the
-notebook. When the notebook is run by hand, that is the developer.
+The notebook calls `notebookutils.credentials.getToken` for the executing
+identity's SQL token, then exposes it to the separate dbt process through a
+runtime-generated `TokenCredential` and `authentication: token_credential`
+profile. The dbt subprocess cannot call `notebookutils` directly. The profile
+is temporary; it is not committed to the repository.
 
 | | Now: developer's own identity | Target: technical identity |
 |---|---|---|
-| Warehouse auth | `notebookutils`, the executing user's Entra token | Service principal (`ActiveDirectoryServicePrincipal`) or Fabric workspace identity |
-| Azure DevOps auth | Personal PAT, scope *Code (Read)*, short expiry | Service principal or managed identity added to the Azure DevOps organisation, no PAT |
-| Trigger | Manual run of the notebook or the pipeline | Scheduled pipeline with a connection owned by the technical identity |
+| Warehouse auth | Runtime `token_credential` backed by the executing user's Entra token | Service principal (`ActiveDirectoryServicePrincipal`) or Fabric workspace identity |
+| Azure DevOps auth | Short-lived PAT, scope *Code (Read)*, passed as a SecureString pipeline parameter | Service principal or managed identity added to the Azure DevOps organisation, no PAT |
+| Trigger | Developer manually runs `pl_Create_DW_Core` in Fabric | Scheduled pipeline with a connection owned by the technical identity |
 | Risk | Stops when the person leaves, the PAT expires or a policy changes; every data change is audited under a personal name | Independent of people; least privilege; clear audit trail |
 | Fit | Development, training, manual demos | Test and production |
 
@@ -3809,14 +3879,16 @@ solution is a technical identity, for four reasons:
 - the audit log shows "the pipeline changed the data", not a developer;
 - nobody needs personal write access to production data.
 
-Note: when the notebook runs from a pipeline, the executing identity is
-defined by the pipeline (for example its last modifier), not necessarily by
-the person who clicked Run. Iteration O4 verifies this.
+When the notebook runs from a pipeline, the pipeline's execution identity is
+used (for example, its last modifier), not necessarily the person who clicked
+Run. Iteration 64 verified that `run_info.json` recorded the expected
+developer identity.
 
 #### Decision point: where the PAT comes from
 
-No Key Vault is available yet. The PAT is therefore passed as a notebook
-parameter at run time and is never saved in the notebook or the repository.
+No Key Vault is configured yet. The PAT is therefore supplied to the pipeline
+as a `SecureString` parameter and passed to the notebook with `secureInput`;
+it is never saved in the notebook or the repository.
 The notebook code keeps a Key Vault branch (`notebookutils.credentials.getSecret`)
 as a placeholder. Switching to it is a configuration change, not a rewrite.
 
@@ -3826,7 +3898,8 @@ as a placeholder. Switching to it is a configuration change, not a rewrite.
 2. Do not replace a validating load with a plain Copy activity.
 3. One run equals one batch, and it is clear which batch was loaded.
 4. Never store secrets in a notebook, a pipeline definition or Git. Prefer
-   Key Vault; give a PAT the minimum scope and a short expiry.
+   Key Vault; if a PAT is temporarily needed, pass it as a SecureString with
+   the minimum scope and a short expiry, then revoke it after the test.
 5. Pin dbt and adapter versions to match local development.
 6. Keep `threads: 1` in every target, because Fabric Warehouse deadlocks on
    parallel DDL (Iteration 59).
@@ -3932,16 +4005,14 @@ folder, and with an unknown folder fails before writing anything.
 pipeline per layer, plus a master that only chains them:
 
 ```text
-pl_Master
-  Generate Data  --on success-->  Load Delta  --on success-->  DW create  --on success-->  Refresh semantic model
-  (pl_Landing_Raw)                (pl_Landing_Delta)           (pl_Create_DW)                 (Semantic model refresh activity)
+pl_Master_Core
+  Generate Data  --on success-->  Load Delta  --on success-->  DW create and test
+  (pl_Landing_Raw_Core)            (pl_Landing_Delta_Core)      (pl_Create_DW_Core; added in O4)
 ```
 
-The original staged plan added the DW step in O4 and the semantic refresh in
-O7. The current workspace definition includes both: the DW child is followed
-by a Semantic model refresh activity for `sm_reporting`; the DW child must
-succeed before that refresh starts. The semantic refresh is an activity in the
-master, not a separate child pipeline.
+The workspace master initially had the first two activities. O4 adds the DW
+child pipeline after Landing succeeds. The semantic-model refresh remains a
+planned follow-up and is not yet in the current workspace definition.
 
 **Why:**
 
@@ -3973,13 +4044,13 @@ Transaction_Ledger,1,1,csv
 A Lookup returns every CSV value as a string, so the pipeline compares with
 `'1'`, not `1`.
 
-#### Step 1: `pl_Landing_Raw`
+#### Step 1: `pl_Landing_Raw_Core`
 
 A single notebook activity that runs `nb_generate_deterministic_sample_data`.
 The pipeline parameter `p_simulate_changes` (int, default `0`) is passed to
 the notebook parameter of the same name.
 
-#### Step 2: `pl_Landing_Delta`
+#### Step 2: `pl_Landing_Delta_Core`
 
 ```text
 Set v_load_date
@@ -4049,7 +4120,7 @@ The csv branch, the notebook activity inside the ForEach:
 }
 ```
 
-#### Step 3: `pl_Master`
+#### Step 3: `pl_Master_Core`
 
 Three child activities are chained on success: `Generate Data`, `Load Delta`,
 and `DW create and test`. The first two are Execute Pipeline activities (shown
@@ -4057,9 +4128,8 @@ as "Invoke pipeline (Legacy)" in the UI), both with `waitOnCompletion: true`.
 `referenceName` is the child pipeline's item id. `p_simulate_changes` is
 passed to the generator; `p_batch_folder` is passed empty to Landing, so a
 normal run loads the batch that was just generated. The DW child receives the
-secure `p_ado_token` parameter. A Semantic model refresh activity follows the
-DW child, uses the Power BI connection, and waits for the full refresh to
-complete.
+secure `p_ado_token` parameter. A semantic-model refresh is a planned
+follow-up after the DW child succeeds.
 
 #### Decision points
 
@@ -4089,7 +4159,7 @@ for current capabilities.
 validates every file before writing any table. Called per entity, an error in
 the fourth entity leaves the first three tables already on the new batch. This
 is acceptable because every iteration gets the same batch folder, so one rerun
-of `pl_Landing_Delta` (with the same `p_batch_folder` if needed) restores
+of `pl_Landing_Delta_Core` (with the same `p_batch_folder` if needed) restores
 a consistent state, and the dbt step only starts when the whole Landing
 pipeline succeeded.
 
@@ -4108,7 +4178,7 @@ pipeline succeeded.
 7. Keep retries at 0 until retry behaviour is designed (O5).
 8. Store each pipeline in Git with a unique `logicalId` in `.platform`.
 
-**Verification run:** `pl_Master` ran with default parameters and
+**Verification run:** `pl_Master_Core` ran with default parameters and
 completed in about 23.5 minutes. Generate Data created folder
 `20261118093359`. Load Delta resolved the latest batch from four folders to
 `20261118093359`. The Lookup returned five config rows, all five passed the
@@ -4131,6 +4201,269 @@ Two observations follow from the per-entity design:
 all Landing tables carry the same, newest `meta_batch_timestamp`; a config row
 with an unknown `type` fails the run.
 
+### Iteration 64 (O4). Run dbt from Fabric and verify the master step
+
+**Goal:** add a dedicated dbt pipeline step, run it from the Fabric UI with
+the developer's identity, and verify both the dbt results and the persisted
+run artefacts.
+
+**Why:** the Landing pipeline and dbt build have separate responsibilities.
+Keeping dbt in its own pipeline makes it independently runnable and lets the
+master wait for a successful Warehouse build before a later semantic-model
+refresh.
+
+**Implemented flow:**
+
+```text
+pl_Master_Core
+  1. Generate Data
+  2. Load Delta
+  3. DW create and test --> pl_Create_DW_Core --> nb_run_dbt
+```
+
+`pl_Create_DW_Core` exposes `p_ado_token` as a `SecureString`, plus the
+`p_branch`, `p_dbt_target`, `p_dbt_command`, and `p_dbt_args` parameters. The
+notebook's defaults are `main`, `dev`, `build`, and an empty argument string.
+The notebook activity marks its input secure. For this development test, the
+developer started `pl_Create_DW_Core` manually in Fabric and supplied a
+short-lived Azure DevOps PAT with only *Code: Read* permission.
+
+The Python notebook installs the pinned dbt versions in an isolated temporary
+environment, shallow-clones the requested branch, refreshes the Lakehouse SQL
+endpoint metadata, and runs dbt with the executing identity's SQL token. It
+copies `run_info.json`, `run_results.json`, and `dbt.log` to
+`Files/dbt_runs/<run_id>_<command>/`; a failed dbt command raises an exception
+so the pipeline also fails.
+
+**Verified run:**
+
+| Check | Result |
+|---|---|
+| Pipeline | `pl_Create_DW_Core` completed successfully in about 5 minutes 17 seconds |
+| Source | `main` at commit `f1c56440640467c05e8ff0546693cde6d286536d` |
+| Identity and target | Developer identity recorded in the run artefact, target `dev` |
+| Versions | `dbt-core==1.12.6`, `dbt-fabric==1.12.0` |
+| dbt result | 233/233 nodes completed successfully: 25 successful models/snapshots and 208 passing tests; dbt elapsed time was about 109 seconds |
+| Artefacts | `Files/dbt_runs/20261118132120_build/` contains the run metadata, results, and log |
+
+The Landing batch was newer than the existing Bronze snapshot data, but its
+business values were identical. The generator ran with
+`p_simulate_changes = 0`, so the `check` snapshots correctly created no new
+versions. Bronze and Gold therefore still show the previous business-data
+batch timestamp, `2026-11-17 08:00:03`; this is expected, not a failed load.
+For a visible history change, run the generator with
+`p_simulate_changes = 1`, then run the master and verify that the changed
+snapshot rows have new validity intervals.
+
+**Decision point: obtain source code at run time or deploy an artefact**
+
+| Option | Best fit | Trade-off |
+|---|---|---|
+| Clone Azure DevOps during the notebook run (chosen for this exercise) | Simple manual development run | Needs an Azure DevOps credential each time; branch content can change between runs |
+| Deploy an approved dbt project version to OneLake | Repeatable release and no repository credential in the Fabric run | Requires a deployment step and explicit release/commit metadata |
+
+For CI/CD, prefer deploying a reviewed, immutable project version and recording
+its commit in the release metadata. Avoid relying on a moving branch for
+production runs. The current development approach uses a PAT because the
+developer's Fabric tenant token was not accepted by the Azure DevOps
+organisation; production should use a technical identity and a supported
+secret/credential mechanism rather than a personal PAT.
+
+**Best practices**
+
+1. Keep the dbt execution in a child pipeline and make the master wait for it
+   to succeed.
+2. Pass secrets as SecureString parameters, mark notebook inputs secure, and
+   never print credentials. Use Key Vault or a non-personal identity for
+   production.
+3. Record the exact source commit, target, tool versions, execution identity,
+   and results for each run.
+4. Keep dbt and adapter versions pinned, and keep Warehouse DDL concurrency
+   controlled with `threads: 1`.
+5. Distinguish a successful no-change snapshot run from a failed ingestion:
+   unchanged values should not create new snapshot versions.
+6. Revoke a short-lived development PAT after the test.
+
+**Acceptance check:** `pl_Create_DW_Core` succeeds when manually run in
+Fabric; its artefacts identify the commit and executing identity; and the
+master invokes it only after Landing succeeds.
+
+## Part XII. CI/CD with Azure DevOps and Fabric
+
+**Status:** implementation guide, not a record of enabled branch policies or
+deployed UAT/Production stages. Start in the
+[Oyster Azure Repos repository](https://dev.azure.com/pulze-azure-devops/Oyster/_git/Oyster)
+(`pulze-azure-devops` organization, `Oyster` project, `Oyster` repository).
+Azure Repos is the source of truth for approved definitions. Azure Pipelines
+validates code; Fabric Git integration syncs definitions into Development;
+Fabric deployment pipelines promote approved items to other workspaces.
+None of those actions is the same as running a Fabric data pipeline.
+
+```text
+main -> feature/* -> PR to main (review + CI) -> squash merge
+     -> Fabric Development: Update from Git -> deploy to Test/UAT
+     -> isolated build + reporting smoke test -> approve -> deploy to Production
+```
+
+### 1. Create a short-lived feature branch and make a focused change
+
+| What to click | Expected result | Why |
+|---|---|---|
+| In Oyster, **Repos > Branches > New branch**. Set **Name** to e.g. `feature/123-ledger-check`, **Based on** to `main`, and select **Create**. Use `fix/*` for a correction. | The new branch starts from current `main`; unrelated work stays out of it. | A short-lived branch makes the change easier to review and reduces merge conflicts. |
+| In VS Code, fetch and switch to the new branch. After editing, open **Source Control**, stage only the intended files, then **Commit** and **Push** to the Oyster remote. | The branch in Azure Repos contains the dbt models, tests, and any related documentation or Fabric definitions, with no secrets or generated `target/` and `logs/` files. | Reviewers need the complete change, but neither credentials nor local outputs belong in Git. |
+| For changes authored in Fabric, use an isolated feature workspace. In **Workspace settings > Git integration**, connect it to Azure DevOps, repo `Oyster`, the feature branch, and the same Fabric artifact folder as Development. In that workspace, open **Source control > Changes**, select the intended items and click **Commit** (or **Commit to Git**). | The definition changes and required dependencies appear on the feature branch, not directly on `main`. Review the exported diff, including `.platform` identity and item references. | A shared workspace must not push around `main` protections. Use one authoring path per item to avoid simultaneous edits in Git and Fabric. |
+
+If Git already contains the authoritative definitions, initialize the feature
+workspace from Git, not by exporting an unrelated workspace over the branch.
+For pure dbt or documentation changes, there is no need to create a feature
+workspace.
+
+### 2. Protect `main` and add automatic PR validation
+
+#### Protect `main` against direct pushes
+
+In the [Oyster Azure Repos repository](https://dev.azure.com/pulze-azure-devops/Oyster/_git/Oyster),
+use a Project Administrator account or an account with **Edit policies**.
+Changing branch permissions also requires **Manage permissions**.
+
+| What to click | Expected result | Why |
+|---|---|---|
+| **Repos > Branches > `main` > More options (...) > Branch policies**. Enable **Require a minimum number of reviewers**, set it to `1`, leave **Allow requestors to approve their own changes** off, and reset approval votes on new changes. | A required policy blocks direct pushes for identities without bypass permission. A PR needs an independent approval. This works even before `Oyster CI` is configured. | Protection is enforced by Azure Repos, not by a developer's local Git settings. |
+| On the same page, set **Check for comment resolution** to **Required**. Under **Limit merge types**, allow **Squash merge** only. | Unresolved comments block completion, and one merged PR produces one commit. | The review covers the change that lands, and the resulting commit is easier to trace and revert. |
+| Return to **Repos > Branches > `main` > More options (...) > Branch security**. Check **Bypass policies when pushing**, **Bypass policies when completing pull requests**, and **Force push**. Verify that contributors and CI/Fabric identities do not have these permissions, including through inherited or group grants. Keep **Contribute** for users who must complete approved PRs. | Direct pushes cannot skip review, and approved PRs can still be completed. | A required policy does not stop an identity with bypass permission. Removing **Contribute** instead can also prevent normal PR completion. |
+
+Developers can still create local commits and push to their feature branches;
+the server rejects a direct push to `main`. The same restriction applies to
+**Commit to Git** from a Fabric workspace connected to `main` when the
+identity has no bypass permission. Commit Fabric edits from a feature
+workspace and open a PR; in the Development workspace connected to `main`,
+use **Update from Git** after the merge.
+
+See [Azure Repos branch permissions](https://learn.microsoft.com/en-us/azure/devops/repos/git/branch-permissions?view=azure-devops).
+
+#### Bootstrap the automatic PR check
+
+On a setup branch, add `azure-pipelines-ci.yml` at the Oyster repository root.
+Use **Repos > Files** to check that the YAML is on the intended branch.
+This starter job parses the dbt project without connecting to a Warehouse.
+Use the same dbt versions as the runner notebook; update the two together.
+
+```yaml
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: windows-latest
+
+steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.11'
+  - powershell: |
+      python -m pip install "dbt-core==1.12.6" "dbt-fabric==1.12.0"
+      if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      dbt parse --profiles-dir . --target dev
+      exit $LASTEXITCODE
+    workingDirectory: '$(Build.SourcesDirectory)/dbt_oyster_path'
+    displayName: Parse the dbt project without a Warehouse connection
+```
+
+| What to click | Expected result | Why |
+|---|---|---|
+| In the Oyster project, **Pipelines > Pipelines > New pipeline > Azure Repos Git > Oyster > Existing Azure Pipelines YAML file**. Select the setup branch and `/azure-pipelines-ci.yml`, then **Continue > Run**. Rename the pipeline to `Oyster CI` from its **More actions** menu. | The first run passes on the setup branch. After the setup PR is merged, confirm the pipeline can load this YAML from `main`. If a build policy already exists, use the normal review and validation process; do not bypass it. | A branch policy needs an existing pipeline. Running it once proves the agent can install the pinned packages and load the project before the check becomes required. |
+| Open **Repos > Branches > `main` > More options (...) > Branch policies > Build validation > +**. Select `Oyster CI`, set **Trigger** to **Automatic**, **Policy requirement** to **Required**, and **Build expiration** to **Immediately when `main` is updated**, then **Save**. Leave the path filter empty initially. | Azure Repos queues validation of the proposed merge and blocks completion on failure or stale results. | Azure Repos Git uses a target-branch **Build validation** policy for PRs, not a YAML `pr:` trigger. The YAML `trigger` above is for builds after changes land on `main`. |
+
+With a disposable, ready-for-review test PR, confirm that a broken dbt reference
+produces a failed validation and blocks completion. Push a fix and confirm
+the new validation passes. `dbt parse` catches project/configuration and
+dependency errors, not SQL execution or data-quality failures. Keep this
+unprivileged job separate from jobs that can write to Fabric.
+
+### 3. Open, review and merge the pull request
+
+1. **Click:** **Repos > Pull requests > New pull request**. Verify source
+   `feature/...` (or `fix/...`) and target `main`. Add a reviewer, link the work
+   item if applicable, and select **Create**.
+   **Expect:** the description says what changed, why, how it was tested,
+   which Fabric items or data contracts are affected, and how to roll back.
+   **Why:** the PR is the audit trail for the proposed change.
+2. **Click:** in the PR, open **Files** and **Overview**; inspect changes,
+   reviewer votes, and the `Oyster CI` run. Fix failures on the same branch
+   and push again. **Expect:** no unresolved blocking comments, at least one
+   independent approval, and a passing required build for the current PR.
+   **Why:** a green run from an earlier revision does not validate new changes.
+3. **Click:** **Complete > Squash commit** and select **Delete source branch**
+   when it is no longer needed. **Expect:** the PR is **Completed** and its
+   merge commit is visible on `main`. Record that commit SHA as the release
+   candidate. **Why:** deployments and audit records must identify the exact
+   revision, not just a branch name that can move.
+
+### 4. Sync Development, then deploy and test in UAT
+
+| What to click | Expected result | Why |
+|---|---|---|
+| In Fabric Development (`ws-oyster-path`), check **Workspace settings > Git integration** for Oyster, `main`, and the intended folder. Open **Source control > Updates**, review the incoming changes and select **Update all** only if they match the candidate. | The workspace shows the approved commit as synced. If it has local changes, conflicts, or newer unapproved changes, stop and resolve them before promotion. | A merge alone does not update a workspace. Do not overwrite someone else's work or silently promote a newer revision. |
+| For the initial ALM setup, open **Workspaces > Deployment pipelines > Create pipeline** (or **+ New pipeline**). Use **Development**, **Test** (UAT), and **Production**; assign a separate capacity-backed workspace to each stage with **Assign a workspace**. | The stages point to distinct workspaces with the required permissions. Test and Production are not also updated directly from the same Git branch in this workflow. | One promotion path per environment prevents concurrent writers and accidental production tests. |
+| Select **Test** as the target and use **Compare** / **Compare stages**. Select the approved items and missing dependencies; choose **Deploy** (in the original UI, select the source items and choose **Deploy** to Test). | The deployment history lists the expected items. In Test, verify the Warehouse, Lakehouse SQL endpoint, log Lakehouse, notebook references, Power BI connection, and semantic model target. | Deployment copies definitions, not table data. Do not assume that hard-coded IDs, credentials, or data sources rebind automatically. |
+| After the destination checks, open the master data pipeline `pl_Master_Core` **in Test** and select **Run** with the approved test configuration. Open **Monitoring hub** (or the pipeline's run history), select the run and inspect each activity. | Landing completes, `nb_run_dbt` refreshes the Test Lakehouse SQL endpoint before `dbt build`, dbt models and tests pass, and (after the planned semantic-refresh step is implemented) the Test semantic model refresh succeeds only after the DW step. Check `Files/dbt_runs/.../run_info.json` and `run_results.json` in the Test Lakehouse; confirm the commit, target and results. Then open the Test report and check a known KPI against the test data. | This verifies deployed bindings, real SQL, data quality and the reporting hand-off, none of which the parse job can prove. |
+
+**Required before enabling UAT/Prod runs:** provide stage-specific source and
+Warehouse targets, credentials, and item/connection IDs. The current runner
+and pipelines have development defaults; in particular, `p_branch` defaults
+to `main`, `p_dbt_target` to `dev`, and the runner has default Lakehouse and
+SQL endpoint IDs. A target called `prod` is not proof of isolation: the
+current profile has development fallbacks. Make these bindings explicit and
+verify them before running. For a reproducible release, update the runner to
+accept and verify an immutable commit SHA, or use a protected, immutable
+release tag via the branch/tag clone parameter. Expose that input through the
+master and the DW child. Do not treat a moving `main` checkout as a release
+pin. The current master also generates sample data: **do not run it
+unchanged in Production**. Set up the approved production ingestion path
+and keep deployment credentials out of Git and PR-variable contexts.
+
+### 5. Approve Production, verify the release, and automate in stages
+
+1. **Click:** in the Fabric deployment pipeline, open **Test** and its
+   deployment history. Review the UAT run and record release SHA, run ID,
+   test evidence, expected environment bindings and recovery plan in the
+   release work item. After the designated approver signs off, compare Test
+   with **Production**, select the approved items and click **Deploy**.
+   **Expect:** exactly the UAT-verified candidate is promoted. If the Test
+   workspace changed after validation, repeat the checks. **Why:** approval
+   applies to that version, not to whatever is currently in Test.
+2. **Click:** in the Production workspace, check item settings and bindings;
+   run only the approved production load/build flow, then verify its run and
+   the semantic refresh in **Monitoring hub**. **Expect:** the recorded SHA
+   matches, expected outputs are present, and no refresh follows a failed
+   DW build. **Why:** deployment success does not prove that the data run
+   succeeded. On failure, stop promotion or further runs. Revert the PR
+   through a new reviewed PR and redeploy the corrected definitions if
+   needed; restore or repair data separately because a code revert does not
+   undo table writes or snapshot history.
+3. **Automate after the manual route is proven:** in Oyster, open
+   **Pipelines > Environments > New environment** for `oyster-uat` and
+   `oyster-prod`. On `oyster-prod`, use **Approvals and checks > + >
+   Approvals** to require a designated approver and prevent self-approval.
+   Bind the CD YAML's `deployment` jobs to those environments. After a
+   successful `main` CI run, the CD pipeline should deploy the pinned
+   candidate, wait for the Fabric operation to finish, run the isolated
+   Test build and smoke checks, and stop on failure before requesting
+   Production approval. Use a least-privilege technical identity and
+   serialize releases per target. **Expect:** an unapproved or failed run
+   never reaches Prod; the Azure DevOps run retains the commit, Fabric
+   run/deployment IDs, and test evidence. **Why:** environment checks are
+   enforced outside the YAML edited in a PR. They do not gate deployments
+   initiated manually in the Fabric portal; restrict that path separately.
+
+References: Microsoft Learn on
+[Azure Repos branch policies](https://learn.microsoft.com/en-us/azure/devops/repos/git/branch-policies?view=azure-devops),
+[Azure Repos build triggers](https://learn.microsoft.com/en-us/azure/devops/pipelines/repos/azure-repos-git?view=azure-devops),
+[Fabric Git integration](https://learn.microsoft.com/en-us/fabric/cicd/git-integration/git-get-started),
+[Fabric stage deployment](https://learn.microsoft.com/en-us/fabric/cicd/deployment-pipelines/deploy-content),
+and [Azure Pipelines approvals and checks](https://learn.microsoft.com/en-us/azure/devops/pipelines/process/approvals?view=azure-devops).
+
 ## What we deliberately have not implemented
 
 - Additional facts (for example balances), remaining business rules, and
@@ -4147,6 +4480,8 @@ with an unknown `type` fails the run.
 - CSV parser corruption checks and a comprehensive schema-collision policy.
 - An explicit downstream policy for new extra columns.
 - Scheduling, notifications, permissions, and retention automation.
+- The Azure DevOps CI gate and UAT/Production CD rollout described in Part XII;
+  the instructions and starter YAML are documented, not configured here.
 
 These are real next decisions, not guarantees supplied by the existing tests.
 
@@ -4174,13 +4509,13 @@ These are real next decisions, not guarantees supplied by the existing tests.
 - [Generator notebook](../../fabric-artifacts/notebooks/nb_generate_deterministic_sample_data.Notebook/notebook-content.py)
 - [Loader notebook](../../fabric-artifacts/notebooks/nb_csv_load_source_to_ld.Notebook/notebook-content.py)
 - [Four snapshots and their column tests](../snapshots/bronze/_bronze__snapshots.yml)
-- [Incremental ledger](../models/bronze/bz_oys_transaction_ledger.sql)
+- [Incremental ledger](../models/bronze/b_oys_transaction_ledger.sql)
 - [Ledger column tests and operational description](../models/bronze/_bronze__models.yml)
 - [Landing batch test](../tests/landing/assert_landing_single_batch.sql)
 - [Current snapshot version test](../tests/bronze/assert_bronze_current_keys_unique.sql)
 - [Transaction immutability test](../tests/bronze/assert_transaction_events_immutable.sql)
 - [Gold dimensions, facts, and snapshot tests](../models/gold/)
-- [Gold account-tier snapshot model](../models/gold/gold_fct_account_tier_daily_snapshot.sql)
+- [Gold account-tier snapshot model](../models/gold/g_fct_account_tier_daily_snapshot.sql)
 - [Gold account-tier snapshot tests](../tests/gold/)
 - [Gold snapshot end-date test](../tests/gold/assert_gold_snapshot_end_date.sql)
 - [Initial-load history policy macros](../macros/initial_history_policy.sql)

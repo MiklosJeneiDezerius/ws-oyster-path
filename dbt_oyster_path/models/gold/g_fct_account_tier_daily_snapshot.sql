@@ -15,14 +15,14 @@ with transaction_bounds as (
     select
         min(cast(transaction_timestamp as date)) as first_transaction_date,
         max(cast(transaction_timestamp as date)) as last_transaction_date
-    from {{ ref('gold_fct_transaction') }}
+    from {{ ref('g_fct_transaction') }}
     where transaction_timestamp is not null
 ),
 snapshot_dates as (
     select
         calendar.date_key,
         calendar.calendar_date as snapshot_date
-    from {{ ref('gold_dim_date') }} as calendar
+    from {{ ref('g_dim_date') }} as calendar
     cross join transaction_bounds as bounds
     where calendar.calendar_date >= bounds.first_transaction_date
       and calendar.calendar_date <= bounds.last_transaction_date
@@ -35,7 +35,7 @@ account_days as (
         accounts.account_key,
         accounts.account_id,
         accounts.customer_id
-    from {{ ref('gold_dim_account') }} as accounts
+    from {{ ref('g_dim_account') }} as accounts
     inner join snapshot_dates as dates
         on accounts.is_unknown = 0
        and accounts.is_deleted = 0
@@ -70,7 +70,7 @@ account_card_days as (
             else 'matched'
         end as customer_lookup_status
     from account_days
-    left join {{ ref('gold_dim_customer') }} as customers
+    left join {{ ref('g_dim_customer') }} as customers
         on customers.customer_id = account_days.customer_id
        and customers.is_unknown = 0
        and customers.is_deleted = 0
@@ -80,7 +80,7 @@ account_card_days as (
        and customers.valid_to >= dateadd(
             day, 1, cast(account_days.snapshot_date as datetime2(6))
        )
-    left join {{ ref('gold_dim_debitcard') }} as cards
+    left join {{ ref('g_dim_debitcard') }} as cards
         on cards.account_id = account_days.account_id
        and cards.is_active = 1
        and cards.is_deleted = 0
@@ -95,7 +95,7 @@ transaction_coverage as (
     select
         account_id,
         min(cast(transaction_timestamp as date)) as first_account_transaction_date
-    from {{ ref('gold_fct_transaction') }}
+    from {{ ref('g_fct_transaction') }}
     where transaction_timestamp is not null
     group by account_id
 ),
@@ -108,7 +108,7 @@ rolling_spend as (
             cast(0 as decimal(38, 2))
         ) as rolling_30_day_spend
     from account_days
-    left join {{ ref('gold_fct_transaction') }} as transactions
+    left join {{ ref('g_fct_transaction') }} as transactions
         on transactions.account_id = account_days.account_id
        and transactions.transaction_timestamp >= dateadd(
             day, -29, cast(account_days.snapshot_date as datetime2(6))

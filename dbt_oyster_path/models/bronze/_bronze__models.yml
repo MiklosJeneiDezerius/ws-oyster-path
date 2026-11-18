@@ -1,7 +1,7 @@
 version: 2
 
 models:
-  - name: bz_oys_transaction_ledger
+  - name: b_oys_transaction_ledger
     description: >
       Append-only transaction events captured from landing. Full refresh is
       disabled because landing contains only the latest batch. After initial

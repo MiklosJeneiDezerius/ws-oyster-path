@@ -12,4 +12,4 @@ select
     meta_batch_timestamp,
     meta_load_timestamp,
     meta_source_file
-from {{ ref('bz_oys_transaction_ledger') }}
+from {{ ref('b_oys_transaction_ledger') }}

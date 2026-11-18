@@ -3,8 +3,8 @@ with account_lookup as (
         transactions.*,
         accounts.account_key,
         accounts.customer_id
-    from {{ ref('stg_oys_transaction_ledger') }} as transactions
-    left join {{ ref('dim_account') }} as accounts
+    from {{ ref('bis_fct_transaction_staging') }} as transactions
+    left join {{ ref('s_dim_account') }} as accounts
         on accounts.account_id = transactions.account_id
        and accounts.is_unknown = 0
        and accounts.is_deleted = 0
@@ -35,15 +35,15 @@ select
     transactions.meta_load_timestamp,
     transactions.meta_source_file
 from account_lookup as transactions
-left join {{ ref('dim_customer') }} as customers
+left join {{ ref('s_dim_customer') }} as customers
     on customers.customer_id = transactions.customer_id
    and customers.is_unknown = 0
    and customers.is_deleted = 0
    and transactions.transaction_timestamp >= customers.valid_from
    and transactions.transaction_timestamp < customers.valid_to
-left join {{ ref('dim_date') }} as dates
+left join {{ ref('s_dim_date') }} as dates
     on dates.calendar_date = cast(transactions.transaction_timestamp as date)
-left join {{ ref('dim_time') }} as times
+left join {{ ref('s_dim_time') }} as times
     on times.time_key =
         datepart(hour, transactions.transaction_timestamp)*3600
         + datepart(minute, transactions.transaction_timestamp)*60
