@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "pl_Create_DW",
+    "description": "Step 3: runs dbt (build by default) from Azure DevOps against the Warehouse via nb_run_dbt."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "4167c1e0-467a-966b-43cf-f36d99e040b5"
+  }
+}
