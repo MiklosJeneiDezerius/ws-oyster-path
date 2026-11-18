@@ -22,9 +22,7 @@
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "frozen": true,
-# META   "editable": false
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # PARAMETERS CELL ********************
