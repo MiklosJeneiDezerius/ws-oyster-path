@@ -3,10 +3,10 @@
   "metadata": {
     "type": "DataPipeline",
     "displayName": "pl_fl_master",
-    "description": "Master: chains Generate Data -> Load Delta -> dbt DW build -> semantic model refresh."
+    "description": "Master v2: chains Generate Data -> Load Delta -> dbt DW build -> semantic model refresh."
   },
   "config": {
     "version": "2.0",
-    "logicalId": "5bf38163-c813-474a-b06a-0c1a43849efd"
+    "logicalId": "e316df99-b1e8-b45a-430b-9968433f6858"
   }
 }

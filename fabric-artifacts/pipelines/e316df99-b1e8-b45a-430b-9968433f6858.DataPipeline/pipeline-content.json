@@ -76,21 +76,25 @@
         ]
       },
       {
-        "type": "Activity",
+        "type": "PBISemanticModelRefresh",
+        "typeProperties": {
+          "method": "POST",
+          "groupId": "00000000-0000-0000-0000-000000000000",
+          "datasetId": "79f4b3cf-73a9-9b6d-45bf-20a95317b0e5",
+          "type": "Full",
+          "commitMode": "transactional",
+          "waitOnCompletion": true,
+          "operationType": "RefreshDataset"
+        },
+        "externalReferences": {
+          "connection": "cbe086b5-9d49-4561-8700-5a9616c45af7"
+        },
         "policy": {
           "timeout": "0.02:00:00",
           "retry": 0,
           "retryIntervalInSeconds": 30,
           "secureInput": false,
           "secureOutput": false
-        },
-        "typeProperties": {
-          "workspaceId": "00000000-0000-0000-0000-000000000000",
-          "datasetId": "79f4b3cf-73a9-9b6d-45bf-20a95317b0e5",
-          "waitOnCompletion": true
-        },
-        "externalReferences": {
-          "connection": "cbe086b5-9d49-4561-8700-5a9616c45af7"
         },
         "name": "Refresh semantic model",
         "dependsOn": [
