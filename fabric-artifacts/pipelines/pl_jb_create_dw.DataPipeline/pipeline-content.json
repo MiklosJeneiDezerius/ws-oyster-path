@@ -2,16 +2,7 @@
   "properties": {
     "activities": [
       {
-        "name": "nb_run_dbt",
         "type": "TridentNotebook",
-        "dependsOn": [],
-        "policy": {
-          "timeout": "0.01:00:00",
-          "retry": 0,
-          "retryIntervalInSeconds": 30,
-          "secureInput": true,
-          "secureOutput": false
-        },
         "typeProperties": {
           "notebookId": "bb04c3a5-b773-90c7-4288-5968b3b1737d",
           "workspaceId": "00000000-0000-0000-0000-000000000000",
@@ -52,7 +43,16 @@
               "type": "string"
             }
           }
-        }
+        },
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": true,
+          "secureOutput": false
+        },
+        "name": "nb_run_dbt",
+        "dependsOn": []
       }
     ],
     "parameters": {

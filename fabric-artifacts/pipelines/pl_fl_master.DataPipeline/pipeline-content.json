@@ -2,12 +2,7 @@
   "properties": {
     "activities": [
       {
-        "name": "Generate Data",
         "type": "ExecutePipeline",
-        "dependsOn": [],
-        "policy": {
-          "secureInput": false
-        },
         "typeProperties": {
           "pipeline": {
             "referenceName": "2b39e20c-492b-45cc-a7b9-c4d0968eb7df",
@@ -20,20 +15,15 @@
             }
           },
           "waitOnCompletion": true
-        }
-      },
-      {
-        "name": "Load Delta",
-        "type": "ExecutePipeline",
-        "dependsOn": [
-          {
-            "activity": "Generate Data",
-            "dependencyConditions": [ "Succeeded" ]
-          }
-        ],
+        },
         "policy": {
           "secureInput": false
         },
+        "name": "Generate Data",
+        "dependsOn": []
+      },
+      {
+        "type": "ExecutePipeline",
         "typeProperties": {
           "pipeline": {
             "referenceName": "7f96d73c-3b59-4573-b3a6-350165eeb1ab",
@@ -43,20 +33,22 @@
             "p_batch_folder": ""
           },
           "waitOnCompletion": true
-        }
-      },
-      {
-        "name": "DW create and test",
-        "type": "ExecutePipeline",
+        },
+        "policy": {
+          "secureInput": false
+        },
+        "name": "Load Delta",
         "dependsOn": [
           {
-            "activity": "Load Delta",
-            "dependencyConditions": [ "Succeeded" ]
+            "activity": "Generate Data",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
           }
-        ],
-        "policy": {
-          "secureInput": true
-        },
+        ]
+      },
+      {
+        "type": "ExecutePipeline",
         "typeProperties": {
           "pipeline": {
             "referenceName": "f3cf59a1-9aa5-4b8c-a887-bda4888c908d",
@@ -69,17 +61,22 @@
             }
           },
           "waitOnCompletion": true
-        }
-      },
-      {
-        "name": "Refresh semantic model",
-        "type": "SemanticModelRefresh",
+        },
+        "policy": {
+          "secureInput": true
+        },
+        "name": "DW create and test",
         "dependsOn": [
           {
-            "activity": "DW create and test",
-            "dependencyConditions": [ "Succeeded" ]
+            "activity": "Load Delta",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
           }
-        ],
+        ]
+      },
+      {
+        "type": "Activity",
         "policy": {
           "timeout": "0.02:00:00",
           "retry": 0,
@@ -94,7 +91,16 @@
         },
         "externalReferences": {
           "connection": "cbe086b5-9d49-4561-8700-5a9616c45af7"
-        }
+        },
+        "name": "Refresh semantic model",
+        "dependsOn": [
+          {
+            "activity": "DW create and test",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
       }
     ],
     "parameters": {
