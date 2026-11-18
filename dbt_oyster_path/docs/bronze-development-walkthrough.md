@@ -1731,12 +1731,18 @@ changes or new events are captured.
 ### Iteration 38. Demonstrate one real business change
 
 This is a controlled **future verification exercise**, not a data change already
-performed:
+performed. The generator supports it through its `p_simulate_changes` parameter
+cell (default `0` = baseline):
 
-1. Create a new complete delivery folder with a strictly later batch timestamp.
-2. Change one customer's `LastName`; preserve every other entity and key.
-3. Load that delivery and pass landing tests/freshness.
-4. Snapshot and inspect that customer's versions.
+1. Run the generator with `p_simulate_changes = 1`. It creates a new complete
+   delivery folder with a strictly later batch timestamp and, compared with the
+   baseline, changes only:
+   - customer `1001` (Eszter): `LastName` `Kovacs` -> `Nagy`;
+   - the Permanent address of customers `1101` (`AddressID` 3193) and `1102`
+     (`AddressID` 3194): new postal code, city, street, and house number.
+   Every other entity, key, and transaction is identical to the baseline.
+2. Load that delivery and pass landing tests/freshness.
+3. Snapshot and inspect the changed customer and addresses.
 
 Inspect the deliberately changed customer in the Warehouse:
 
@@ -1750,14 +1756,27 @@ order by dbt_valid_from;
 
 Use the actual chosen key if it is not `1001`.
 
+Inspect the moved addresses the same way:
+
+```sql
+select AddressID, CustomerID, PostalCode, City, Street, HouseNumber,
+       dbt_valid_from, dbt_valid_to, dbt_is_deleted
+from dev_bronze.bz_oys_customer_address
+where AddressID in ('3193', '3194')
+order by AddressID, dbt_valid_from;
+```
+
 **Expected:** one additional version for that customer (two versions if there
-was only one before the test). The old version closes at the new batch
-observation time; the new version is current. The other snapshots do not gain
-versions merely because their load metadata changed.
+was only one before the test), and likewise for each of the two addresses. The
+old version closes at the new batch observation time; the new version is
+current. The other snapshots do not gain versions merely because their load
+metadata changed.
 
 Record the counts before and after: the customer snapshot increases by exactly
-one, and other snapshot counts stay unchanged. Run snapshots again without
-changing landing; no further versions should appear.
+one, the address snapshot by exactly two, and other snapshot counts stay
+unchanged. Run snapshots again without changing landing; no further versions
+should appear. Running the generator again with `p_simulate_changes = 0`
+reverts these values, which produces another version for the same three keys.
 
 Do not mutate an already-snapshotted delivery and reuse its timestamp.
 Because the generator is deterministic, rerunning it alone is not proof of
@@ -3623,7 +3642,7 @@ as a placeholder. Switching to it is a configuration change, not a rewrite.
 
 1. Orchestrate tested artefacts; do not put new logic in the pipeline.
 2. Do not replace a validating load with a plain Copy activity.
-3. One run equals one batch, and the batch identifier flows between steps.
+3. One run equals one batch, and it is clear which batch was loaded.
 4. Never store secrets in a notebook, a pipeline definition or Git. Prefer
    Key Vault; give a PAT the minimum scope and a short expiry.
 5. Pin dbt and adapter versions to match local development.
@@ -3636,96 +3655,84 @@ as a placeholder. Switching to it is a configuration change, not a rewrite.
 run method, the run identity, the secret source and the target technical
 identity are recorded.
 
-### Iteration 62 (O2). Pass the batch identifier between steps
+### Iteration 62 (O2). Decide how the loader selects the batch
 
-**Goal:** in a pipeline run, the loader loads exactly the batch folder that
-the generator created in the same run.
+**Goal:** make the batch the loader reads explicit and controllable, without
+coupling the generator to the pipeline.
 
-**Why:** with `p_batch_folder = ""` the loader picks the latest folder
-(`max(batch_folders)`). That is convenient by hand but unsafe in a pipeline: a
-concurrent run or a manual upload can create a newer folder, and a rerun is
-not guaranteed to load the same batch. Passing the folder explicitly makes the
-run deterministic and replayable.
+**Why:** the generator only writes files into a new `yyyyMMddHHmmss` folder;
+it returns nothing to its caller, just as a real source system would not. The
+loader therefore decides which batch to read:
+
+- `p_batch_folder` set: load exactly that folder (reload or replay);
+- `p_batch_folder` empty: load the latest folder. Folder names are UTC
+  timestamps, so the lexicographic maximum is the most recent batch.
 
 The loader's parameter cell was marked `# CELL` in the source file, not
 `# PARAMETERS CELL`. Fabric therefore did not treat it as a parameter cell,
 and a pipeline override of `p_batch_folder` would have been silently ignored.
 
-**1. Generator: return the folder name as the last cell**
-(`nb_generate_deterministic_sample_data`).
-
-```python
-# CELL ********************
-
-# Return the batch folder to the caller (pipeline: @activity('01_generate_data').output.result.exitValue).
-# Must stay the LAST cell: notebook.exit stops execution.
-notebookutils.notebook.exit(ingest_date)
-```
-
-**2. Loader: make the parameter cell a real parameter cell**
-(`nb_csv_load_source_to_ld`).
+**Loader parameter cell** (`nb_csv_load_source_to_ld`):
 
 ```python
 # PARAMETERS CELL ********************
 
 # Parameters (pipelines override these; in the Fabric UI this shows as the "Parameters" cell).
 p_root_path = "Files/landing/oyster"
-p_batch_folder = ""   # "" = latest batch folder (manual runs only); pipelines always pass the generator's folder
+p_batch_folder = ""   # "" = latest batch folder (yyyyMMddHHmmss names sort chronologically); or e.g. "20261117080003" to reload a specific batch
 p_entities = ""       # "" = all entities; or comma-separated, e.g. "Customer,Account"
 p_debug = 0           # 1 = display a preview of each loaded table
 ```
 
-**3. Loader: return a machine-readable summary as the last cell.**
+The existing selection logic stays unchanged:
 
 ```python
-# CELL ********************
-
-import json
-
-# Machine-readable run summary for the pipeline (and the run history): which batch, how many rows per table.
-# Must stay the LAST cell: notebook.exit stops execution.
-summary = {
-    "batch_folder": batch_folder,
-    "batch_timestamp": batch_ts.isoformat(),
-    "load_timestamp": load_ts.isoformat(),
-    "row_counts": {e: spark.table(t).count() for e, (t, _) in prepared.items()},
-}
-print(json.dumps(summary, indent=2))
-notebookutils.notebook.exit(json.dumps(summary))
+batch_folders = [
+    f.name.rstrip("/")
+    for f in notebookutils.fs.ls(p_root_path)
+    if f.isDir and re.fullmatch(r"\d{14}", f.name.rstrip("/"))
+]
+if not batch_folders:
+    raise FileNotFoundError(f"No batch folders found under {p_root_path}")
+if p_batch_folder and p_batch_folder not in batch_folders:
+    raise FileNotFoundError(f"Batch folder {p_batch_folder} not found under {p_root_path}")
+batch_folder = p_batch_folder or max(batch_folders)
 ```
 
-**4. Pipeline wiring** (configured in O3): the loader activity receives
-
-```text
-p_batch_folder = @activity('01_generate_data').output.result.exitValue
-```
+**Pipeline wiring** (configured in O3): the loader activity exposes
+`p_batch_folder` as a pipeline parameter with an empty default. A normal run
+loads the latest batch; a replay passes a folder name.
 
 #### Decision points
 
 | Decision | Options | Choice |
 |---|---|---|
-| Who defines the batch identifier | a) the generator; b) the pipeline (`@formatDateTime(utcnow(),'yyyyMMddHHmmss')`) passed to both notebooks | **a)**: the generator already names the folder, as a real source system would. Option b) suits sources without a generator step, such as external uploads. |
-| Empty `p_batch_folder` | Latest folder, or an error | Keep "latest" for manual runs; the pipeline always passes a value |
-| Exit value format | Plain string or JSON | String for the generator (one value); JSON for the loader (summary, extensible) |
+| How the loader learns the batch | a) the generator returns the folder name and the pipeline passes it; b) the loader takes the latest folder unless a folder is given | **b)**: the generator stays a pure file producer, independent of the pipeline, and behaves like an external source. |
+| Empty `p_batch_folder` | Latest folder, or an error | **Latest folder**; an unknown explicit folder fails the run |
+| Replay of an older batch | Not supported, or an explicit parameter | **Explicit parameter** |
+
+Trade-off of b): "latest" is only safe when one run at a time writes and reads
+the landing folder. A concurrent run or a manual upload between generation and
+loading would make the loader pick a different folder. O6 handles this with a
+concurrency guard on the pipeline.
 
 **Best practices**
 
-1. Pass identifiers explicitly instead of relying on "latest"; this removes
-   race conditions and makes reruns replayable.
-2. Keep `notebook.exit` in the last cell, because it stops execution.
+1. Name batch folders with a sortable UTC timestamp (`yyyyMMddHHmmss`), so
+   "latest" is a simple and reliable maximum.
+2. Keep the default convenient (latest) and the override explicit (a folder
+   name); fail on an unknown folder instead of falling back silently.
 3. Check the parameter cell marker in the source file, not only in the UI.
-4. End each run with a machine-readable summary (batch, row counts); it is
-   the basis for later anomaly checks.
-5. Do not freeze a `%%configure` cell. A frozen cell is skipped at run time.
+4. Do not freeze a `%%configure` cell. A frozen cell is skipped at run time.
    A notebook that relies on `%%configure` for its default Lakehouse then has
    no Lakehouse, and its first `Files/...` access fails.
-6. Compare the live definition with the repository copy before uploading,
+5. Compare the live definition with the repository copy before uploading,
    and upload only the intended change.
 
 **Verification run:** the generator created folder `20261118072024`. The
-loader, run with `p_batch_folder=20261118072024`, loaded exactly that batch.
-All five Landing tables show `meta_batch_timestamp = 2026-11-18 07:20:24` with
-the same load timestamp and the expected counts (102, 194, 102, 102, 4,840).
+loader loaded exactly that batch. All five Landing tables show
+`meta_batch_timestamp = 2026-11-18 07:20:24` with the same load timestamp and
+the expected counts (102, 194, 102, 102, 4,840).
 
 **Finding for the next steps:** the Lakehouse SQL analytics endpoint exposed
 the new Delta version only some time after the loader finished. dbt reads
@@ -3733,9 +3740,9 @@ Landing through that endpoint, so a dbt step started immediately after the
 loader can snapshot the previous batch. The pipeline must refresh the SQL
 endpoint metadata before dbt runs (O3/O4).
 
-**Acceptance check:** a manual generator run exits with the folder name; a
-loader run with `p_batch_folder=<folder>` loads exactly that batch and exits
-with the JSON summary.
+**Acceptance check:** the generator only writes files; the loader with an
+empty `p_batch_folder` loads the newest folder, with a folder name loads that
+folder, and with an unknown folder fails before writing anything.
 
 ## What we deliberately have not implemented
 

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "nb_json_load_source_to_ld",
+    "description": "Loads the nested Transaction_Ledger JSON (flatten + explode) into a Landing Delta table."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "d7cffd77-c81a-aba4-487b-1656b3a1ed2b"
+  }
+}
