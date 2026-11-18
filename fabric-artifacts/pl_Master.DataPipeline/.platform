@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "pl_Master",
+    "description": "Master: chains the layer pipelines (Generate Data -> Load Delta; dbt and semantic refresh follow in O4/O7)."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "0a271b3c-506b-a30d-4792-79c07c3358a5"
+  }
+}

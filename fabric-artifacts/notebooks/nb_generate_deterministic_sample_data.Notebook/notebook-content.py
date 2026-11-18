@@ -22,9 +22,19 @@
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "frozen": true,
-# META   "editable": false
+# META   "language_group": "synapse_pyspark"
+# META }
+
+# PARAMETERS CELL ********************
+
+# Parameters (pipelines override these; in the Fabric UI this shows as the "Parameters" cell).
+p_simulate_changes = 0   # 0 = baseline data; 1 = baseline + 1 female customer LastName change + 2 address changes (SCD2 test)
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # CELL ********************
@@ -80,6 +90,24 @@ customers = [
 
 assert len(customers) == CUSTOMER_COUNT
 assert len({customer["CustomerID"] for customer in customers}) == CUSTOMER_COUNT
+
+# Change scenario: applied after generation without drawing random numbers, so every other value
+# (accounts, cards, transactions) stays identical to the baseline.
+FEMALE_FIRST_NAMES = {"Anna", "Eszter", "Juli", "Nora"}
+renamed_customer_id = None
+
+if int(p_simulate_changes):
+    renamed_customer = next(c for c in customers if c["FirstName"] in FEMALE_FIRST_NAMES)
+    renamed_customer_id = renamed_customer["CustomerID"]
+    old_last_name = renamed_customer["LastName"]
+    renamed_customer["LastName"] = last_names[
+        (last_names.index(old_last_name) + 1) % len(last_names)
+    ]
+    assert renamed_customer["LastName"] != old_last_name
+    print(
+        f"Névváltozás: CustomerID={renamed_customer_id} {renamed_customer['FirstName']} "
+        f"{old_last_name} -> {renamed_customer['LastName']}"
+    )
 
 file_name = f"Customer_{run_started_at:%Y%m%dT%H%M%S}.csv"
 customer_csv_path = os.path.join(output_dir, file_name)
@@ -157,6 +185,29 @@ assert all(
     == count
     for count, address_types in address_plan
 )
+
+# Change scenario: move the Permanent address of the last two customers (not the renamed one).
+# AddressID stays the same, so the snapshot records a new version of the existing address.
+if int(p_simulate_changes):
+    relocated_customer_ids = [customer["CustomerID"] for customer in customers[-2:]]
+    assert renamed_customer_id not in relocated_customer_ids
+
+    for customer_id in relocated_customer_ids:
+        address = next(
+            a for a in customer_addresses
+            if a["CustomerID"] == customer_id and a["AddressType"] == "Permanent"
+        )
+        old_location = (address["PostalCode"], address["City"], address["Street"])
+        new_location = address_locations[
+            (address_locations.index(old_location) + 3) % len(address_locations)
+        ]
+        address["PostalCode"], address["City"], address["Street"] = new_location
+        address["HouseNumber"] = str(int(address["HouseNumber"]) + 10)
+        print(
+            f"Címváltozás: CustomerID={customer_id} AddressID={address['AddressID']} "
+            f"{old_location[1]} -> {address['PostalCode']} {address['City']}, "
+            f"{address['Street']} {address['HouseNumber']}"
+        )
 
 file_name = f"CustomerAdress_{run_started_at:%Y%m%dT%H%M%S}.csv"
 customer_address_csv_path = os.path.join(output_dir, file_name)
@@ -423,7 +474,6 @@ print(
 
 import json
 import os
-from pyspark.sql import functions as F
 
 # A JSON útvonala ugyanaz a mappa és fájlnév-törzs, mint a CSV-é.
 file_name = f"Transaction_Ledger_{run_started_at:%Y%m%dT%H%M%S}.json"
@@ -469,45 +519,8 @@ with open(transaction_json_path, "w", encoding="utf-8") as json_file:
     for document in json_documents:
         json_file.write(json.dumps(document, ensure_ascii=False) + "\n")
 
-print(f"JSON mentve: {transaction_json_path}")
-
-# Visszaolvasás és kibontás táblás formába.
-nested_transactions_df = spark.read.json(transaction_json_relative_path)
-
-transactions_json_flat_df = (
-    nested_transactions_df
-    .select(
-        F.explode(
-            F.flatten(F.col("Data.TransactionBatches"))
-        ).alias("Transaction")
-    )
-    .select(
-        F.col("Transaction.TransactionID").cast("long").alias("TransactionID"),
-        F.col("Transaction.AccountID").cast("long").alias("AccountID"),
-        F.col("Transaction.Amount").cast("decimal(18, 2)").alias("Amount"),
-        F.col("Transaction.Timestamp").alias("Timestamp"),
-    )
-)
-
-assert transactions_json_flat_df.count() == len(transactions)
-
-display(
-    transactions_json_flat_df
-    .orderBy("AccountID", "Timestamp")
-)
-
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# Return the batch folder to the caller (pipeline: @activity('01_generate_data').output.result.exitValue).
-# Must stay the LAST cell: notebook.exit stops execution.
-notebookutils.notebook.exit(ingest_date)
+# A kibontást (flatten + explode) és az ellenőrzést az nb_json_load_source_to_ld végzi.
+print(f"{len(json_documents)} JSON dokumentum mentve: {transaction_json_relative_path}")
 
 # METADATA ********************
 
