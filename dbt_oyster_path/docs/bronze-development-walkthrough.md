@@ -347,7 +347,9 @@ Apply the same header/UTF-8/context-manager pattern to all five entities:
 | Transaction ledger | Transaction_Ledger_&lt;run timestamp&gt;.csv |
 
 The generator also writes `Transaction_Ledger_<run timestamp>.json` as an
-alternative nested representation. The CSV loader does not consume that JSON.
+alternative nested representation. The CSV loader does not consume that JSON;
+the generator only writes it. See "Alternative: the source delivers JSON" at
+the end of Part 0 for the loader that flattens it.
 
 **Why one shared change:** the serialization mechanism is identical across the
 entities; only the records, field list, and filename prefix differ.
@@ -603,7 +605,8 @@ ENTITIES = {
 ```
 
 **Why:** table names, required columns, and keys have one shared mechanism.
-The generator writes both transaction CSV and JSON; this loader uses CSV.
+The generator writes both transaction CSV and JSON; this loader uses CSV
+(the JSON alternative is described at the end of Part 0).
 
 ### Iteration 14. Add pipeline parameters
 
@@ -893,6 +896,170 @@ FROM dbo.ld_oys_transaction_ledger GROUP BY meta_batch_timestamp, meta_load_time
 and load times. Business values remain strings, and all required columns exist.
 These checks do not add cross-table atomicity, uniqueness enforcement, or a
 producer-completion protocol; the limits discussed above still apply.
+
+### Alternative: the source delivers JSON instead of CSV
+
+**Goal:** show how the same Landing table is produced when a source sends
+nested JSON instead of a flat CSV file. The example is the transaction ledger,
+which the generator also writes as `Transaction_Ledger_<run timestamp>.json`.
+The notebook is `nb_json_load_source_to_ld`, placed next to the CSV loader.
+
+**Why it matters:** many sources (APIs, event exports) deliver documents, not
+rows. Landing must still expose one row per business record with the same
+column contract, so that dbt sources, snapshots and tests stay unchanged.
+
+**The input shape:** JSON Lines, one document per account. Transactions are
+grouped into arrays of 20, so the payload is an array of arrays:
+
+```json
+{"SourceSystem": "oyster", "IngestDate": "20261118072024",
+ "Data": {"AccountID": 1001,
+          "TransactionBatches": [
+            [{"TransactionID": 1, "AccountID": 1001, "Amount": "12.30", "Timestamp": "2026-10-02 14:05:11"}, "... up to 20"],
+            [{"TransactionID": 21, "AccountID": 1001, "Amount": "4.10", "Timestamp": "2026-10-09 08:41:52"}]
+          ]}}
+```
+
+#### Step 1. Read with an explicit schema
+
+```python
+transaction_schema = StructType([StructField(c, StringType()) for c in REQUIRED_COLUMNS])
+document_schema = StructType([
+    StructField("SourceSystem", StringType()),
+    StructField("IngestDate", StringType()),
+    StructField("Data", StructType([
+        StructField("AccountID", StringType()),
+        StructField("TransactionBatches", ArrayType(ArrayType(transaction_schema))),
+    ])),
+])
+
+documents = (
+    spark.read.schema(document_schema)
+    .option("mode", "FAILFAST")        # a malformed JSON line fails the run instead of becoming a null row
+    .json(f"{p_root_path}/{batch_folder}/Transaction_Ledger_*.json")
+    .select("*", F.col("_metadata.file_name").alias("meta_source_file"))
+)
+```
+
+**Why:** schema inference costs an extra pass and can change types between
+deliveries. Every leaf is `STRING`, exactly like the CSV Landing; JSON numbers
+keep their raw text, and typing stays in Silver. `FAILFAST` turns a broken line
+into a failed run; the default `PERMISSIVE` mode would load it as a null row.
+
+#### Step 2. Validate the envelope before exploding
+
+```python
+bad_envelopes = documents.filter(
+    F.col("Data.AccountID").isNull()
+    | F.col("Data.TransactionBatches").isNull()
+    | (F.size("Data.TransactionBatches") == 0)
+    | F.exists("Data.TransactionBatches", lambda b: b.isNull() | (F.size(b) == 0))
+).count()
+if bad_envelopes:
+    raise ValueError(f"{bad_envelopes} document(s) without AccountID or with empty batches")
+```
+
+**Why this check comes first:** `flatten` and `explode` lose data silently.
+
+- `flatten` returns `NULL` for the whole account if any inner array is `NULL`.
+- `explode` emits no row for a `NULL` or empty array.
+
+Without this check, a damaged document would make an entire account disappear
+from Landing without any error.
+
+#### Step 3. `flatten` + `explode`: from documents to rows
+
+```python
+transactions = (
+    documents
+    .select(
+        F.col("Data.AccountID").alias("envelope_account_id"),
+        F.explode(F.flatten("Data.TransactionBatches")).alias("tx"),
+        "meta_source_file",
+    )
+    .select("envelope_account_id", "tx.*", "meta_source_file")
+)
+```
+
+| Function | Input | Output | Effect on row count |
+|---|---|---|---|
+| `flatten` | `array<array<struct>>` | `array<struct>` | none; it concatenates the inner arrays of one row |
+| `explode` | `array<struct>` | `struct` | one output row per array element |
+| `tx.*` | `struct` | flat columns | none; it promotes the struct fields to columns |
+
+For one account with 45 transactions in batches of 20 + 20 + 5: `flatten`
+produces one array of 45 elements, `explode` produces 45 rows, and `tx.*`
+turns each struct into the columns `TransactionID`, `AccountID`, `Amount`,
+`Timestamp`. The envelope `AccountID` is carried along so that it can be
+checked against the transaction.
+
+**Alternatives and when to use them:**
+
+| Function | Use when |
+|---|---|
+| `explode` | Every parent must have children; missing children are rejected earlier (our case) |
+| `explode_outer` | A parent without children is legitimate and must still produce a row (with `NULL` children) |
+| `posexplode` | The position inside the array carries meaning (line number, ordering) |
+| `inline` | Shortcut for `explode` + `tx.*` on an array of structs |
+| Two `explode` calls instead of `flatten` | The batch number itself is needed (explode the outer array with `posexplode`, then the inner one) |
+
+#### Step 4. Validate rows and project the CSV contract
+
+```python
+missing = transactions.filter(
+    reduce(or_, [F.col(c).isNull() | (F.trim(F.col(c)) == "") for c in REQUIRED_COLUMNS])
+).count()
+foreign = transactions.filter(F.col("AccountID") != F.col("envelope_account_id")).count()
+duplicates = transactions.groupBy("TransactionID").count().filter("count > 1").count()
+# each non-zero count raises ValueError
+
+out = transactions.select(
+    *REQUIRED_COLUMNS,
+    F.lit(batch_ts).alias("meta_batch_timestamp"),
+    F.lit(load_ts).alias("meta_load_timestamp"),
+    "meta_source_file",
+)
+```
+
+The write (`overwrite`, Delta) runs only after every check has passed.
+
+**Why the AccountID check:** nesting introduces a new kind of error that a flat
+file cannot have, a transaction placed under the wrong parent document.
+
+#### Decision points
+
+| Decision | Options | Choice |
+|---|---|---|
+| Target table | a) separate table `dbo.ld_oys_transaction_ledger_json`; b) replace `dbo.ld_oys_transaction_ledger` | **a)** by default, so both paths can be compared; set `p_target_table = "dbo.ld_oys_transaction_ledger"` once the source switches to JSON. dbt does not change. |
+| Parsing | Python on the driver (`json.loads`) or Spark reader | **Spark with an explicit schema**: it scales, and the schema is a contract |
+| Duplicated `TransactionID` | Keep the latest, or fail | **Fail**: Landing does not repair the source silently. Deduplication is a deliberate downstream decision. |
+| Malformed line | `PERMISSIVE`, `DROPMALFORMED`, `FAILFAST` | **`FAILFAST`** |
+| Batch selection | Same as the CSV loader | **Same** (`p_batch_folder`, empty = latest folder) |
+
+#### Best practices
+
+1. The output column contract is the same as for CSV; only the reader differs.
+   The file format is a Landing concern, and dbt must not see it.
+2. Keep every leaf a string in Landing, and type in Silver.
+3. Validate the parent structure before `explode`. `flatten` and `explode`
+   drop data without raising an error.
+4. Validate parent/child consistency (the envelope `AccountID`).
+5. Write only after all checks have passed.
+6. Reconcile a new ingestion path against the old one before switching. The
+   last notebook cell compares the JSON table with the CSV table using
+   `exceptAll` in both directions.
+7. Refresh the SQL analytics endpoint metadata before reading a new table
+   through it (see O2).
+
+**Verification run (batch `2026-11-18 07:20:24`):**
+
+| Table | Rows | Distinct TransactionID | SUM(Amount) | Rows only in this table |
+|---|---|---|---|---|
+| `ld_oys_transaction_ledger_json` | 4,840 | 4,840 | 417,485.75 | 0 |
+| `ld_oys_transaction_ledger` (CSV) | 4,840 | 4,840 | 417,485.75 | 0 |
+
+The column names and types are identical as well, so the JSON path can replace
+the CSV path without changing dbt.
 
 Continue with dbt setup below. No later section introduces another loader edit.
 
@@ -3579,8 +3746,14 @@ Target flow:
 ```text
 pl_master_orchestration  (triggered manually)
   01_generate_data  --on success-->  02_landing_raw  --on success-->  03_run_dbt
-  (generator)                        (validating loader)               (nb_run_dbt: clone + dbt build)
+  (generator)                        (validating loader)               (nb_run_dbt: refresh Lakehouse SQL endpoint metadata, then dbt build)
+                                                                         --on success-->  04_refresh_semantic_model
+                                                                                         (sm_reporting)
 ```
+
+Iteration 63 (O3) refines this into one pipeline per layer and a master
+(`pl_Master`) that chains the layer pipelines, the dbt/DW build, and the
+semantic model refresh.
 
 `nb_run_dbt` performs these steps:
 
@@ -3590,10 +3763,19 @@ pl_master_orchestration  (triggered manually)
 3. Shallow-clone `main` from
    `https://dev.azure.com/pulze-azure-devops/Oyster/_git/Oyster`. The PAT
    travels only in an HTTP header; it is never put in the URL or printed.
-4. Run `dbt build` against a dedicated `fabric_notebook` target with
+4. Refresh the Lakehouse SQL endpoint metadata through the Fabric
+   `refreshMetadata` API. This makes the latest Landing Delta versions visible
+   to dbt sources; it is a metadata refresh, not a separate DW refresh.
+5. Run `dbt build` against a dedicated `fabric_notebook` target with
    `authentication: notebookutils` and `threads: 1`.
-5. Copy `target/run_results.json` to Lakehouse Files as an audit record.
-6. Raise an exception when dbt fails, so the pipeline activity fails.
+6. Copy the run results and dbt log to Lakehouse Files as run artefacts.
+7. Raise an exception when dbt fails, so the pipeline activity fails.
+
+The dbt `build` creates or updates the Warehouse objects and data; there is no
+separate DW refresh step. In `pl_Master`, the Semantic model refresh
+activity runs only after `DW create and test` succeeds, waits for completion,
+and refreshes the full `sm_reporting` model. See Microsoft's
+[Semantic model refresh activity documentation](https://learn.microsoft.com/en-us/fabric/data-factory/semantic-model-refresh-activity).
 
 #### Decision point: which run method
 
@@ -3743,6 +3925,211 @@ endpoint metadata before dbt runs (O3/O4).
 **Acceptance check:** the generator only writes files; the loader with an
 empty `p_batch_folder` loads the newest folder, with a folder name loads that
 folder, and with an unknown folder fails before writing anything.
+
+### Iteration 63 (O3). One pipeline per layer, a config-driven Landing load and a master
+
+**Goal:** replace the single `pl_master_orchestration` sketched in O1 with one
+pipeline per layer, plus a master that only chains them:
+
+```text
+pl_Master
+  Generate Data  --on success-->  Load Delta  --on success-->  DW create  --on success-->  Refresh semantic model
+  (pl_Landing_Raw)                (pl_Landing_Delta)           (pl_Create_DW)                 (Semantic model refresh activity)
+```
+
+The original staged plan added the DW step in O4 and the semantic refresh in
+O7. The current workspace definition includes both: the DW child is followed
+by a Semantic model refresh activity for `sm_reporting`; the DW child must
+succeed before that refresh starts. The semantic refresh is an activity in the
+master, not a separate child pipeline.
+
+**Why:**
+
+- One pipeline per layer means each layer can be run on its own. After a
+  failure, only the failed layer is rerun (for example Landing without
+  generating new files), and monitoring shows which layer broke.
+- The master holds no logic, only the order and the on-success dependencies.
+- The Landing load is metadata-driven: a new source is one row in
+  `Files/config/load_config.csv`, not a pipeline change.
+
+The repository copies are in `fabric-artifacts/pipelines/<name>.DataPipeline/`
+(`pipeline-content.json` and `.platform`).
+
+#### The config file
+
+`Files/config/load_config.csv` in `lh_oyster_path` (CSV, as the source
+document's `load_config` but in CSV form):
+
+```text
+source_object_name,is_active,is_active_delta,type
+Account,1,1,csv
+Customer,1,1,csv
+CustomerAdress,1,1,csv
+DebitCard,1,1,csv
+Transaction_Ledger,1,1,csv
+```
+
+`CustomerAdress` keeps the source's spelling, because it is the file prefix.
+A Lookup returns every CSV value as a string, so the pipeline compares with
+`'1'`, not `1`.
+
+#### Step 1: `pl_Landing_Raw`
+
+A single notebook activity that runs `nb_generate_deterministic_sample_data`.
+The pipeline parameter `p_simulate_changes` (int, default `0`) is passed to
+the notebook parameter of the same name.
+
+#### Step 2: `pl_Landing_Delta`
+
+```text
+Set v_load_date
+ -> Set v_batch_folder (= p_batch_folder)
+ -> get_BatchFolders (Get Metadata, childItems of Files/<p_root_folder>)
+ -> flt_BatchFolders (folders with a 14-character name)
+ -> forEach_ResolveLatestBatch (sequential; If newer -> Set v_batch_folder)
+ -> if_NoBatchFound (Fail: NO_BATCH_FOLDER)
+ -> lkp_GetLoadConfig (Lookup, load_config.csv, firstRowOnly = false)
+ -> Filter - active tables (is_active = '1' and is_active_delta = '1')
+ -> forEach_FileLoader (sequential)
+      sw_FileType on toLower(trim(item().type))
+        csv     -> nb_csv_load_source_to_ld (p_batch_folder, p_entities = item().source_object_name)
+        json    -> nb_json_load_source_to_ld (p_batch_folder)
+        default -> Fail: UNSUPPORTED_SOURCE_TYPE
+```
+
+Parameters: `p_batch_folder` (string, default empty = latest) and
+`p_root_folder` (default `landing/oyster`, relative to `Files`).
+Variables: `v_load_date` and `v_batch_folder`.
+
+The key expressions:
+
+```text
+v_load_date        @convertFromUtc(utcNow(), 'Central Europe Standard Time', 'yyyy-MM-dd HH:mm:ss')
+v_batch_folder     @coalesce(pipeline().parameters.p_batch_folder, '')
+batch folders      @and(equals(item().type, 'Folder'), equals(length(item().name), 14))
+resolve items      @if(empty(pipeline().parameters.p_batch_folder), activity('flt_BatchFolders').output.value, createArray())
+newer?             @greater(item().name, variables('v_batch_folder'))
+active tables      @and(equals(item().is_active, '1'), equals(item().is_active_delta, '1'))
+```
+
+The Lakehouse is referenced inline in the Get Metadata and Lookup activities
+(`linkedService` of type `Lakehouse` with `workspaceId`, `artifactId` and
+`rootFolder: Files`), so no separate connection is needed inside the same
+workspace:
+
+```json
+"linkedService": {
+  "name": "lh_oyster_path",
+  "properties": {
+    "type": "Lakehouse",
+    "typeProperties": {
+      "workspaceId": "5e32bf37-c2be-4676-94c7-97213238ed30",
+      "artifactId": "f27d086e-be7b-4e40-8e62-ea4d210b4538",
+      "rootFolder": "Files"
+    }
+  }
+}
+```
+
+The csv branch, the notebook activity inside the ForEach:
+
+```json
+{
+  "name": "nb_csv_load_source_to_ld",
+  "type": "TridentNotebook",
+  "policy": { "timeout": "0.01:00:00", "retry": 0 },
+  "typeProperties": {
+    "notebookId": "730f3dc7-e69c-4c3f-af0b-cfb20ffc4433",
+    "workspaceId": "5e32bf37-c2be-4676-94c7-97213238ed30",
+    "parameters": {
+      "p_batch_folder": { "value": { "value": "@variables('v_batch_folder')", "type": "Expression" }, "type": "string" },
+      "p_entities":     { "value": { "value": "@item().source_object_name", "type": "Expression" }, "type": "string" }
+    }
+  }
+}
+```
+
+#### Step 3: `pl_Master`
+
+Three child activities are chained on success: `Generate Data`, `Load Delta`,
+and `DW create and test`. The first two are Execute Pipeline activities (shown
+as "Invoke pipeline (Legacy)" in the UI), both with `waitOnCompletion: true`.
+`referenceName` is the child pipeline's item id. `p_simulate_changes` is
+passed to the generator; `p_batch_folder` is passed empty to Landing, so a
+normal run loads the batch that was just generated. The DW child receives the
+secure `p_ado_token` parameter. A Semantic model refresh activity follows the
+DW child, uses the Power BI connection, and waits for the full refresh to
+complete.
+
+#### Decision points
+
+| Decision | Options | Choice and reason |
+|---|---|---|
+| Pipeline layout | One master with all activities, or one pipeline per layer with a master | **Per layer:** layers can be rerun alone; failures are localised |
+| Loader in the ForEach | Reuse `nb_csv_load_source_to_ld` with `p_entities`, or write a new per-table notebook | **Reuse:** one tested code base, same validation and `meta_*` columns |
+| Who picks "latest" | Each loader call on its own, or once in the pipeline | **Once in the pipeline:** every entity gets the same folder, even if a new folder appears during the run |
+| How "latest" is found | A small notebook, or Get Metadata + ForEach + If | **Native activities:** no Spark session, runs in seconds; `greater()` compares strings, correct for `yyyyMMddHHmmss` |
+| ForEach mode | Sequential or parallel (`batchCount`) | **Sequential:** predictable, one Spark session at a time; parallel is a later optimisation |
+| File type routing | CSV only, or Switch on `type` | **Switch:** `csv` and `json` loaders; any other value fails the run |
+| `v_load_date` | Batch folder name, or run time | **Run time in Budapest local time:** identifies the run in monitoring and later in notifications (O5) |
+| Child call | Execute Pipeline (legacy) or the new Invoke pipeline | **Execute Pipeline:** same workspace, no connection needed; the new activity needs a connection but can call across workspaces |
+
+**Legacy support clarification:** “Legacy” identifies the older activity; it does
+not by itself mean that the activity is unsupported. Microsoft currently
+documents both activities. The legacy activity can invoke Fabric pipelines in
+the same workspace and monitors the parent pipeline. The new Invoke pipeline
+activity can also invoke pipelines across Fabric workspaces (and ADF or
+Synapse), and supports monitoring the child pipeline; it requires a Connection
+object. Since this master and its child pipelines are in the same workspace,
+the legacy activity remains a supported fit for this design. See Microsoft's
+[Invoke pipeline activity documentation](https://learn.microsoft.com/en-us/fabric/data-factory/invoke-pipeline-activity)
+for current capabilities.
+
+**Trade-off of per-entity loader calls:** called with all entities, the loader
+validates every file before writing any table. Called per entity, an error in
+the fourth entity leaves the first three tables already on the new batch. This
+is acceptable because every iteration gets the same batch folder, so one rerun
+of `pl_Landing_Delta` (with the same `p_batch_folder` if needed) restores
+a consistent state, and the dbt step only starts when the whole Landing
+pipeline succeeded.
+
+**Best practices**
+
+1. Keep layer pipelines independently runnable; the master only orders them.
+2. Use on-success dependencies and `waitOnCompletion: true` in the master, so
+   the next layer never reads a half-loaded previous layer.
+3. Resolve the batch once per run and pass it to every activity.
+4. Fail loudly: no batch folder and an unknown `type` both stop the run with
+   a clear error code, instead of loading nothing or the wrong thing.
+5. Normalise config values (`toLower(trim(...))`) and remember that Lookup
+   returns CSV values as strings.
+6. Set explicit activity timeouts (1 hour per notebook, 10 minutes for
+   metadata activities) instead of the 12-hour default.
+7. Keep retries at 0 until retry behaviour is designed (O5).
+8. Store each pipeline in Git with a unique `logicalId` in `.platform`.
+
+**Verification run:** `pl_Master` ran with default parameters and
+completed in about 23.5 minutes. Generate Data created folder
+`20261118093359`. Load Delta resolved the latest batch from four folders to
+`20261118093359`. The Lookup returned five config rows, all five passed the
+filter, and the csv branch loaded each entity. All five Landing tables show
+`meta_batch_timestamp = 2026-11-18 09:33:59` with the expected counts (102,
+102, 194, 102, 4,840).
+
+Two observations follow from the per-entity design:
+
+- `meta_load_timestamp` now differs per table (09:38 to 09:52), because each
+  table is loaded by its own notebook run. `meta_batch_timestamp` is the
+  column that ties a consistent load together.
+- Each notebook activity starts its own Spark session, about 3.5 minutes per
+  entity, so the Landing step takes about 18 minutes for five small files.
+  Options for later: run the ForEach in parallel (`batchCount`), enable
+  high-concurrency sessions for pipelines with a shared session tag, or call
+  the loader once with all active entities as a comma-separated `p_entities`.
+
+**Acceptance check:** each layer pipeline runs on its own and from the master;
+all Landing tables carry the same, newest `meta_batch_timestamp`; a config row
+with an unknown `type` fails the run.
 
 ## What we deliberately have not implemented
 

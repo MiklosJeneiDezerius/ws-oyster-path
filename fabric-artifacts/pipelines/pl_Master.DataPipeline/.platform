@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "pl_Master",
+    "description": "Master: chains Generate Data -> Load Delta -> dbt DW build -> semantic model refresh."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "5bf38163-c813-474a-b06a-0c1a43849efd"
+  }
+}

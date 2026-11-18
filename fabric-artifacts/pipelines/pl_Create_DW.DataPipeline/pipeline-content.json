@@ -1,0 +1,80 @@
+{
+  "properties": {
+    "activities": [
+      {
+        "name": "nb_run_dbt",
+        "type": "TridentNotebook",
+        "dependsOn": [],
+        "policy": {
+          "timeout": "0.01:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": true,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "notebookId": "b3b1737d-5968-4288-90c7-b773bb04c3a5",
+          "workspaceId": "5e32bf37-c2be-4676-94c7-97213238ed30",
+          "parameters": {
+            "p_ado_token": {
+              "value": {
+                "value": "@pipeline().parameters.p_ado_token",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "p_branch": {
+              "value": {
+                "value": "@pipeline().parameters.p_branch",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "p_dbt_target": {
+              "value": {
+                "value": "@pipeline().parameters.p_dbt_target",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "p_dbt_command": {
+              "value": {
+                "value": "@pipeline().parameters.p_dbt_command",
+                "type": "Expression"
+              },
+              "type": "string"
+            },
+            "p_dbt_args": {
+              "value": {
+                "value": "@pipeline().parameters.p_dbt_args",
+                "type": "Expression"
+              },
+              "type": "string"
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "p_ado_token": {
+        "type": "securestring"
+      },
+      "p_branch": {
+        "type": "string",
+        "defaultValue": "main"
+      },
+      "p_dbt_target": {
+        "type": "string",
+        "defaultValue": "dev"
+      },
+      "p_dbt_command": {
+        "type": "string",
+        "defaultValue": "build"
+      },
+      "p_dbt_args": {
+        "type": "string",
+        "defaultValue": ""
+      }
+    }
+  }
+}

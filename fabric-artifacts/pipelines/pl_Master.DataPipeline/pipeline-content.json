@@ -1,0 +1,110 @@
+{
+  "properties": {
+    "activities": [
+      {
+        "name": "Generate Data",
+        "type": "ExecutePipeline",
+        "dependsOn": [],
+        "policy": {
+          "secureInput": false
+        },
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "44a9de21-32ec-4ff5-ab43-25a97472a3cd",
+            "type": "PipelineReference"
+          },
+          "parameters": {
+            "p_simulate_changes": {
+              "value": "@pipeline().parameters.p_simulate_changes",
+              "type": "Expression"
+            }
+          },
+          "waitOnCompletion": true
+        }
+      },
+      {
+        "name": "Load Delta",
+        "type": "ExecutePipeline",
+        "dependsOn": [
+          {
+            "activity": "Generate Data",
+            "dependencyConditions": [ "Succeeded" ]
+          }
+        ],
+        "policy": {
+          "secureInput": false
+        },
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "4532284a-f3a2-4f36-a146-6dbd4009163f",
+            "type": "PipelineReference"
+          },
+          "parameters": {
+            "p_batch_folder": ""
+          },
+          "waitOnCompletion": true
+        }
+      },
+      {
+        "name": "DW create and test",
+        "type": "ExecutePipeline",
+        "dependsOn": [
+          {
+            "activity": "Load Delta",
+            "dependencyConditions": [ "Succeeded" ]
+          }
+        ],
+        "policy": {
+          "secureInput": true
+        },
+        "typeProperties": {
+          "pipeline": {
+            "referenceName": "99e040b5-f36d-43cf-966b-467a4167c1e0",
+            "type": "PipelineReference"
+          },
+          "parameters": {
+            "p_ado_token": {
+              "value": "@pipeline().parameters.p_ado_token",
+              "type": "Expression"
+            }
+          },
+          "waitOnCompletion": true
+        }
+      },
+      {
+        "name": "Refresh semantic model",
+        "type": "SemanticModelRefresh",
+        "dependsOn": [
+          {
+            "activity": "DW create and test",
+            "dependencyConditions": [ "Succeeded" ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.02:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "workspaceId": "5e32bf37-c2be-4676-94c7-97213238ed30",
+          "datasetId": "5317b0e5-20a9-45bf-9b6d-73a979f4b3cf",
+          "waitOnCompletion": true
+        },
+        "externalReferences": {
+          "connection": "cbe086b5-9d49-4561-8700-5a9616c45af7"
+        }
+      }
+    ],
+    "parameters": {
+      "p_simulate_changes": {
+        "type": "int",
+        "defaultValue": 0
+      },
+      "p_ado_token": {
+        "type": "securestring"
+      }
+    }
+  }
+}

@@ -1,0 +1,392 @@
+{
+  "properties": {
+    "activities": [
+      {
+        "name": "Set v_load_date",
+        "type": "SetVariable",
+        "dependsOn": [],
+        "typeProperties": {
+          "variableName": "v_load_date",
+          "value": {
+            "value": "@convertFromUtc(utcNow(), 'Central Europe Standard Time', 'yyyy-MM-dd HH:mm:ss')",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "Set v_batch_folder",
+        "type": "SetVariable",
+        "dependsOn": [
+          {
+            "activity": "Set v_load_date",
+            "dependencyConditions": [ "Succeeded" ]
+          }
+        ],
+        "typeProperties": {
+          "variableName": "v_batch_folder",
+          "value": {
+            "value": "@coalesce(pipeline().parameters.p_batch_folder, '')",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "get_BatchFolders",
+        "type": "GetMetadata",
+        "dependsOn": [
+          {
+            "activity": "Set v_batch_folder",
+            "dependencyConditions": [ "Succeeded" ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "datasetSettings": {
+            "annotations": [],
+            "linkedService": {
+              "name": "lh_oyster_path",
+              "properties": {
+                "annotations": [],
+                "type": "Lakehouse",
+                "typeProperties": {
+                  "workspaceId": "5e32bf37-c2be-4676-94c7-97213238ed30",
+                  "artifactId": "f27d086e-be7b-4e40-8e62-ea4d210b4538",
+                  "rootFolder": "Files"
+                }
+              }
+            },
+            "type": "Binary",
+            "typeProperties": {
+              "location": {
+                "type": "LakehouseLocation",
+                "folderPath": {
+                  "value": "@pipeline().parameters.p_root_folder",
+                  "type": "Expression"
+                }
+              }
+            }
+          },
+          "fieldList": [ "childItems" ],
+          "storeSettings": {
+            "type": "LakehouseReadSettings",
+            "recursive": false,
+            "enablePartitionDiscovery": false
+          },
+          "formatSettings": {
+            "type": "BinaryReadSettings"
+          }
+        }
+      },
+      {
+        "name": "flt_BatchFolders",
+        "type": "Filter",
+        "dependsOn": [
+          {
+            "activity": "get_BatchFolders",
+            "dependencyConditions": [ "Succeeded" ]
+          }
+        ],
+        "typeProperties": {
+          "items": {
+            "value": "@activity('get_BatchFolders').output.childItems",
+            "type": "Expression"
+          },
+          "condition": {
+            "value": "@and(equals(item().type, 'Folder'), equals(length(item().name), 14))",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "forEach_ResolveLatestBatch",
+        "type": "ForEach",
+        "dependsOn": [
+          {
+            "activity": "flt_BatchFolders",
+            "dependencyConditions": [ "Succeeded" ]
+          }
+        ],
+        "typeProperties": {
+          "isSequential": true,
+          "items": {
+            "value": "@if(empty(pipeline().parameters.p_batch_folder), activity('flt_BatchFolders').output.value, createArray())",
+            "type": "Expression"
+          },
+          "activities": [
+            {
+              "name": "if_IsNewer",
+              "type": "IfCondition",
+              "dependsOn": [],
+              "typeProperties": {
+                "expression": {
+                  "value": "@greater(item().name, variables('v_batch_folder'))",
+                  "type": "Expression"
+                },
+                "ifTrueActivities": [
+                  {
+                    "name": "Set newest batch",
+                    "type": "SetVariable",
+                    "dependsOn": [],
+                    "typeProperties": {
+                      "variableName": "v_batch_folder",
+                      "value": {
+                        "value": "@item().name",
+                        "type": "Expression"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "if_NoBatchFound",
+        "type": "IfCondition",
+        "dependsOn": [
+          {
+            "activity": "forEach_ResolveLatestBatch",
+            "dependencyConditions": [ "Succeeded" ]
+          }
+        ],
+        "typeProperties": {
+          "expression": {
+            "value": "@empty(variables('v_batch_folder'))",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [
+            {
+              "name": "Fail - no batch folder",
+              "type": "Fail",
+              "dependsOn": [],
+              "typeProperties": {
+                "message": {
+                  "value": "@concat('No yyyyMMddHHmmss batch folder found under Files/', pipeline().parameters.p_root_folder)",
+                  "type": "Expression"
+                },
+                "errorCode": "NO_BATCH_FOLDER"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "lkp_GetLoadConfig",
+        "type": "Lookup",
+        "dependsOn": [
+          {
+            "activity": "if_NoBatchFound",
+            "dependencyConditions": [ "Succeeded" ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "typeProperties": {
+          "source": {
+            "type": "DelimitedTextSource",
+            "storeSettings": {
+              "type": "LakehouseReadSettings",
+              "recursive": false,
+              "enablePartitionDiscovery": false
+            },
+            "formatSettings": {
+              "type": "DelimitedTextReadSettings"
+            }
+          },
+          "datasetSettings": {
+            "annotations": [],
+            "linkedService": {
+              "name": "lh_oyster_path",
+              "properties": {
+                "annotations": [],
+                "type": "Lakehouse",
+                "typeProperties": {
+                  "workspaceId": "5e32bf37-c2be-4676-94c7-97213238ed30",
+                  "artifactId": "f27d086e-be7b-4e40-8e62-ea4d210b4538",
+                  "rootFolder": "Files"
+                }
+              }
+            },
+            "type": "DelimitedText",
+            "typeProperties": {
+              "location": {
+                "type": "LakehouseLocation",
+                "folderPath": "config",
+                "fileName": "load_config.csv"
+              },
+              "columnDelimiter": ",",
+              "escapeChar": "\\",
+              "quoteChar": "\"",
+              "firstRowAsHeader": true
+            },
+            "schema": []
+          },
+          "firstRowOnly": false
+        }
+      },
+      {
+        "name": "Filter - active tables",
+        "type": "Filter",
+        "dependsOn": [
+          {
+            "activity": "lkp_GetLoadConfig",
+            "dependencyConditions": [ "Succeeded" ]
+          }
+        ],
+        "typeProperties": {
+          "items": {
+            "value": "@activity('lkp_GetLoadConfig').output.value",
+            "type": "Expression"
+          },
+          "condition": {
+            "value": "@and(equals(item().is_active, '1'), equals(item().is_active_delta, '1'))",
+            "type": "Expression"
+          }
+        }
+      },
+      {
+        "name": "forEach_FileLoader",
+        "type": "ForEach",
+        "dependsOn": [
+          {
+            "activity": "Filter - active tables",
+            "dependencyConditions": [ "Succeeded" ]
+          }
+        ],
+        "typeProperties": {
+          "isSequential": true,
+          "items": {
+            "value": "@activity('Filter - active tables').output.value",
+            "type": "Expression"
+          },
+          "activities": [
+            {
+              "name": "sw_FileType",
+              "type": "Switch",
+              "dependsOn": [],
+              "typeProperties": {
+                "on": {
+                  "value": "@toLower(trim(item().type))",
+                  "type": "Expression"
+                },
+                "cases": [
+                  {
+                    "value": "csv",
+                    "activities": [
+                      {
+                        "name": "nb_csv_load_source_to_ld",
+                        "type": "TridentNotebook",
+                        "dependsOn": [],
+                        "policy": {
+                          "timeout": "0.01:00:00",
+                          "retry": 0,
+                          "retryIntervalInSeconds": 30,
+                          "secureInput": false,
+                          "secureOutput": false
+                        },
+                        "typeProperties": {
+                          "notebookId": "730f3dc7-e69c-4c3f-af0b-cfb20ffc4433",
+                          "workspaceId": "5e32bf37-c2be-4676-94c7-97213238ed30",
+                          "parameters": {
+                            "p_batch_folder": {
+                              "value": {
+                                "value": "@variables('v_batch_folder')",
+                                "type": "Expression"
+                              },
+                              "type": "string"
+                            },
+                            "p_entities": {
+                              "value": {
+                                "value": "@item().source_object_name",
+                                "type": "Expression"
+                              },
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "value": "json",
+                    "activities": [
+                      {
+                        "name": "nb_json_load_source_to_ld",
+                        "type": "TridentNotebook",
+                        "dependsOn": [],
+                        "policy": {
+                          "timeout": "0.01:00:00",
+                          "retry": 0,
+                          "retryIntervalInSeconds": 30,
+                          "secureInput": false,
+                          "secureOutput": false
+                        },
+                        "typeProperties": {
+                          "notebookId": "b3a1ed2b-1656-487b-aba4-c81ad7cffd77",
+                          "workspaceId": "5e32bf37-c2be-4676-94c7-97213238ed30",
+                          "parameters": {
+                            "p_batch_folder": {
+                              "value": {
+                                "value": "@variables('v_batch_folder')",
+                                "type": "Expression"
+                              },
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "defaultActivities": [
+                  {
+                    "name": "Fail - unknown type",
+                    "type": "Fail",
+                    "dependsOn": [],
+                    "typeProperties": {
+                      "message": {
+                        "value": "@concat('Unsupported type ''', item().type, ''' for ', item().source_object_name)",
+                        "type": "Expression"
+                      },
+                      "errorCode": "UNSUPPORTED_SOURCE_TYPE"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "parameters": {
+      "p_batch_folder": {
+        "type": "string",
+        "defaultValue": ""
+      },
+      "p_root_folder": {
+        "type": "string",
+        "defaultValue": "landing/oyster"
+      }
+    },
+    "variables": {
+      "v_load_date": {
+        "type": "String"
+      },
+      "v_batch_folder": {
+        "type": "String"
+      }
+    }
+  }
+}

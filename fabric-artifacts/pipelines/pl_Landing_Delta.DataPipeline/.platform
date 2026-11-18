@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "pl_Landing_Delta",
+    "description": "Step 2: config-driven load of one batch folder into the Landing Delta tables (load_config.csv)."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "7f96d73c-3b59-4573-b3a6-350165eeb1ab"
+  }
+}
