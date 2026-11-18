@@ -13,8 +13,8 @@
           "secureOutput": false
         },
         "typeProperties": {
-          "notebookId": "d256a2b8-1f83-462f-8df7-166c9dc71be6",
-          "workspaceId": "5e32bf37-c2be-4676-94c7-97213238ed30",
+          "notebookId": "9dc71be6-166c-8df7-462f-1f83d256a2b8",
+          "workspaceId": "00000000-0000-0000-0000-000000000000",
           "parameters": {
             "p_simulate_changes": {
               "value": {

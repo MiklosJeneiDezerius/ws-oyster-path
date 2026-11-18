@@ -10,7 +10,7 @@
         },
         "typeProperties": {
           "pipeline": {
-            "referenceName": "44a9de21-32ec-4ff5-ab43-25a97472a3cd",
+            "referenceName": "2b39e20c-492b-45cc-a7b9-c4d0968eb7df",
             "type": "PipelineReference"
           },
           "parameters": {
@@ -36,7 +36,7 @@
         },
         "typeProperties": {
           "pipeline": {
-            "referenceName": "4532284a-f3a2-4f36-a146-6dbd4009163f",
+            "referenceName": "7f96d73c-3b59-4573-b3a6-350165eeb1ab",
             "type": "PipelineReference"
           },
           "parameters": {
@@ -59,7 +59,7 @@
         },
         "typeProperties": {
           "pipeline": {
-            "referenceName": "99e040b5-f36d-43cf-966b-467a4167c1e0",
+            "referenceName": "f3cf59a1-9aa5-4b8c-a887-bda4888c908d",
             "type": "PipelineReference"
           },
           "parameters": {
@@ -88,8 +88,8 @@
           "secureOutput": false
         },
         "typeProperties": {
-          "workspaceId": "5e32bf37-c2be-4676-94c7-97213238ed30",
-          "datasetId": "5317b0e5-20a9-45bf-9b6d-73a979f4b3cf",
+          "workspaceId": "00000000-0000-0000-0000-000000000000",
+          "datasetId": "79f4b3cf-73a9-9b6d-45bf-20a95317b0e5",
           "waitOnCompletion": true
         },
         "externalReferences": {
