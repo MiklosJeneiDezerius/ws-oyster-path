@@ -18,8 +18,10 @@ consumer models and account-tier daily snapshot are implemented and built in
 development.
 
 **Status:** the development stack is built and tested end to end. Landing
-holds one complete `2026-11-17 08:00:03` batch (102 customers, 194 addresses,
-102 accounts, 102 debit cards, 4,840 transactions). Upstream checks passed
+holds one complete `2026-11-18 07:20:24` batch, loaded during the
+orchestration test in Iteration 62 (102 customers, 194 addresses, 102
+accounts, 102 debit cards, 4,840 transactions). The Warehouse layers were
+built from the identical-content `2026-11-17 08:00:03` batch. Upstream checks passed
 27/27, the Silver build 129/129, and the Gold build 72/72. All 4,840
 transactions resolve to account and customer versions under the initial-load
 history policy (Iteration 56). The Gold daily snapshot covers 2026-10-09 to
@@ -3714,6 +3716,22 @@ p_batch_folder = @activity('01_generate_data').output.result.exitValue
 3. Check the parameter cell marker in the source file, not only in the UI.
 4. End each run with a machine-readable summary (batch, row counts); it is
    the basis for later anomaly checks.
+5. Do not freeze a `%%configure` cell. A frozen cell is skipped at run time.
+   A notebook that relies on `%%configure` for its default Lakehouse then has
+   no Lakehouse, and its first `Files/...` access fails.
+6. Compare the live definition with the repository copy before uploading,
+   and upload only the intended change.
+
+**Verification run:** the generator created folder `20261118072024`. The
+loader, run with `p_batch_folder=20261118072024`, loaded exactly that batch.
+All five Landing tables show `meta_batch_timestamp = 2026-11-18 07:20:24` with
+the same load timestamp and the expected counts (102, 194, 102, 102, 4,840).
+
+**Finding for the next steps:** the Lakehouse SQL analytics endpoint exposed
+the new Delta version only some time after the loader finished. dbt reads
+Landing through that endpoint, so a dbt step started immediately after the
+loader can snapshot the previous batch. The pipeline must refresh the SQL
+endpoint metadata before dbt runs (O3/O4).
 
 **Acceptance check:** a manual generator run exits with the folder name; a
 loader run with `p_batch_folder=<folder>` loads exactly that batch and exits
