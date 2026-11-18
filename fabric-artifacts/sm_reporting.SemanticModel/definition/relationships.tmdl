@@ -1,0 +1,16 @@
+relationship 725b05b2-a389-af50-0278-c94ff53a5b8e
+	fromColumn: 'Account Tier Snapshot'.debitcard_key
+	toColumn: 'Debit Card'.debitcard_key
+
+relationship 8a739782-fa61-b8ef-b656-07370c319ec4
+	fromColumn: 'Account Tier Snapshot'.date_key
+	toColumn: Date.date_key
+
+relationship d92a99fa-3879-7f45-e3f3-2046aa865e52
+	fromColumn: 'Account Tier Snapshot'.customer_key
+	toColumn: Customer.customer_key
+
+relationship 622747cb-3c1c-3aa4-828f-0538e1ab6c63
+	fromColumn: 'Account Tier Snapshot'.account_key
+	toColumn: Account.account_key
+
