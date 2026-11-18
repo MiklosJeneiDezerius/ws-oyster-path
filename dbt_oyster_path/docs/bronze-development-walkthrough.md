@@ -1,10 +1,11 @@
 # Building the Oyster Bronze layer, one small change at a time
 
-This guide starts with Day 3 extraction, then reconstructs our development from dbt setup to the current Bronze
-implementation. It is a teaching sequence, not a verbatim transcript: each
-iteration introduces one idea, explains its purpose, shows the code, and gives
-an acceptance check. Applying the same pattern to all tables counts as one
-iteration, not five.
+This guide establishes the data model and Fabric prerequisites, follows Day 3
+extraction, then reconstructs our development from dbt setup to the current
+Bronze implementation. It is a teaching sequence, not a verbatim transcript:
+each iteration introduces one idea, explains its purpose, shows the code, and
+gives an acceptance check. Applying the same pattern to all tables counts as
+one iteration, not five.
 
 **Scope:** raw-file generation and extraction orchestration, Fabric Lakehouse
 landing tables, four Warehouse SCD2 snapshots, and
@@ -12,15 +13,20 @@ one append-only incremental transaction ledger, and the iterative Silver
 extension. Silver currently has shared configuration and typed staging views;
 its customer, account, and debit-card SCD2 dimensions are implemented.
 Date/time dimensions, explicit customer/account Unknown members, and the
-transaction star fact with validation tests are also implemented. Gold is not
-yet implemented.
+transaction star fact with validation tests are also implemented. The Gold
+consumer models and account-tier daily snapshot are implemented and built in
+development.
 
-**Status:** project parsing and resource discovery have passed. Earlier live
-attempts were blocked by authentication/private-link access. In iteration 52,
-the dev connection succeeded: upstream validation returned eight passes and
-19 execution errors from missing relations/columns. Silver was not rebuilt.
-Live Silver creation and history demonstrations remain unverified. Expected
-outcomes below are acceptance criteria, not claims of successful runs.
+**Status:** the development stack is built and tested end to end. Landing
+holds one complete `2026-11-17 08:00:03` batch (102 customers, 194 addresses,
+102 accounts, 102 debit cards, 4,840 transactions). Upstream checks passed
+27/27, the Silver build 129/129, and the Gold build 72/72. All 4,840
+transactions resolve to account and customer versions under the initial-load
+history policy (Iteration 56). The Gold daily snapshot covers 2026-10-09 to
+2026-11-09 with 102 accounts per day and reconciles exactly with an
+independent recalculation from Silver. The semantic model and report are
+designed (Iteration 60) but not yet created. Production builds have not been
+run.
 
 ## How to use this guide
 
@@ -51,6 +57,132 @@ CSV deliveries in Files/landing/oyster/<UTC batch folder>
 In this exercise, “Bronze” means the Warehouse history layer after landing.
 Other medallion implementations call the raw landed data Bronze. Agree on the
 meaning rather than assuming the layer name defines storage semantics.
+
+## Before Part 0: Model and provision the platform
+
+The source exercise begins with conceptual and physical modelling, then sets
+up the Fabric workspace and Lakehouse before extraction or dbt. This section
+adds those prerequisites using the entities and resource names implemented in
+this repository. It does not claim that a workspace or Lakehouse has been
+provisioned by following this document.
+
+### The Oyster Bank business story
+
+Oyster Bank serves individual customers and organizes them into customer
+types, such as Regular and Premium. A customer has identifying and profile
+information, including a name, date of birth, and tax identifier, and may have
+one or more recorded addresses. The bank must be able to relate each address
+back to its customer and distinguish address records, including by address
+type.
+
+Customers open bank accounts. Each account belongs to a customer and has an
+account number, an account type such as Checking or Savings, a currency, and a
+balance. One customer may hold multiple accounts. An account can in turn have
+one or more debit cards. A card has a tier, such as Gold or Platinum, a
+lifecycle status such as Active, Blocked, or Expired, and an expiry date. The
+bank needs to connect each card to the account it belongs to.
+
+Customers use their accounts for everyday transactions. Each transaction is
+recorded as a ledger event with an identifier, the related account, an amount,
+a timestamp, a counterparty, and a status such as Approved, Pending, or
+Denied. An account can therefore be associated with many transaction events.
+Keeping the event and its status makes it possible to analyze account activity
+without treating a transaction as another version of the account itself.
+
+The data platform follows this journey from generated source records to
+analytics: retain each raw delivery, load the selected delivery into queryable
+Landing tables, preserve observed customer, address, account, and card states,
+and accumulate transaction events. Downstream models can then relate customer
+and account history to transaction activity, examine customer spending, and
+compare card tiers with customer or account activity. These are analytical
+questions supported by the model, not claims about particular real customers
+or actual bank operations.
+
+The exercise solution does not include a separate prose brief for “The Oyster
+Bank Story.” This narrative expands its stated customer journey, entity
+relationships, and example attributes into a readable scenario; it is a
+summary of the exercise, not a quotation. Some conceptual entities in that
+model are not separate inputs in this repository; the implemented scope is
+listed below.
+
+### Iteration P1. Turn the business story into a data model
+
+Start from the customer journey: a customer opens an account, receives a debit
+card, and makes transactions. Identify each entity, its stable key, and how
+records relate before choosing table columns or types.
+
+| Entity in this repository | Key and relationship |
+|---|---|
+| Customer | `CustomerID`; one customer can have multiple addresses and accounts |
+| Customer address (`CustomerAdress` in the input file) | `AddressID`; `CustomerID` relates the address to its customer |
+| Account | `AccountID`; `CustomerID` relates the account to its customer; one account can have multiple cards and transactions |
+| Debit card | `CardID`; `AccountID` relates the card to its account |
+| Transaction ledger | `TransactionID`; `AccountID` relates each event to its account |
+
+These are the five entities generated by the current sample-data notebook.
+The exercise's broader conceptual model also proposes reference entities such
+as CustomerType, AccountType, Currency, CardTier, TransactionStatus, and
+CounterParty. They are not separate inputs in this repository; for example,
+`CardTier` is currently an attribute of DebitCard. Treat those additions as
+future scope, not as tables already present in Landing.
+
+The exercise's physical model suggests relational types such as integer keys,
+decimal amounts, dates/timestamps, and variable-length text. Those are design
+choices for typed downstream models, not the Landing contract: Landing keeps
+business values as strings so identifiers and values such as postal codes
+retain their original representation. Define and validate casts in Silver
+rather than relying on CSV inference.
+
+**Check:** trace every foreign key to its parent entity and confirm the key is
+stable across deliveries. Decide how multiple customer addresses are
+distinguished (the current input includes `AddressType`) before using them in
+downstream joins.
+
+### Iteration P2. Confirm the Fabric environment
+
+Before creating resources, verify the intended workspace, assigned Fabric
+capacity, and the operator's workspace permissions. The source exercise
+recommends separate Development, UAT, and Production environments connected
+to source control. For this walkthrough, use the existing development
+workspace and repository setup; additional environments are a deployment
+decision, not a prerequisite to run the documented local dbt checks.
+
+Connect the intended Fabric workspace to the correct Git provider, repository,
+branch, and folder when workspace Git integration is part of the team's
+workflow. Confirm the branch and sync state before making workspace changes.
+Do not create a duplicate workspace, Lakehouse, or generator just to match
+names from the exercise document.
+
+| Exercise document label | Resource used in this repository |
+|---|---|
+| `lh_OysterLake` / `lh_Oysterlake` | `lh_oyster_path` |
+| `nb_GenerateOysterData` | `nb_generate_deterministic_sample_data` |
+| `pl_Landing_Raw` | Proposed extraction pipeline name; verify the workspace asset before referencing it |
+
+**Check:** the intended workspace has capacity and access, and
+`lh_oyster_path` is available. The generator notebook must be saved in that
+workspace and attached to `lh_oyster_path` as its default Lakehouse before it
+writes to OneLake.
+
+### Iteration P3. Agree on the layer boundaries
+
+The intended path is:
+
+```text
+Synthetic source generation
+    -> timestamped raw CSV delivery in Lakehouse Files
+    -> selected delivery loaded into Landing Delta tables
+    -> dbt reads Landing and stores history in the Warehouse Bronze layer
+```
+
+In the current implementation, generated files simulate extraction; they are
+not read from a live banking system. The Landing loader selects a batch and
+overwrites the current Landing tables, while dbt snapshots retain observed
+entity history and the transaction ledger accumulates events. Keep the raw
+deliveries for replay. These choices and their limits—including batch
+completeness, deletes, CDC/CDF, and history between observations—are covered
+in the extraction iterations below. Do not describe a full extract or snapshot
+as capturing every source-side change.
 
 ## Part 0. Day 3 - Extraction
 
@@ -2766,18 +2898,642 @@ Silver model was rebuilt by this attempt. Do not remove tests, substitute load
 time for extract time, or point development at production merely to turn the
 gate green.
 
-**Next prerequisite step:** inspect deployed Landing table names/columns and
-compare them with the updated loader/source contract. Publish/run the approved
-loader only after confirming the intended Lakehouse, source batch, and overwrite
-scope. Once Landing matches the contract and source tests pass, initialize or
-update the approved development Bronze snapshots/ledger, then rerun the upstream
-gate before attempting Silver. These writes are separate from the completed
-validation attempt and require their own review.
+**Follow-up status at that time:** a read-only inspection confirmed four
+Landing tables and no `meta_batch_timestamp`; the Warehouse had only the
+transaction ledger and date/time dimensions among the relations expected by
+Silver. The active-card cardinality assumption was supported by the data: all
+102 accounts had exactly one active card. The transaction ledger contained
+4,840 distinct transactions spanning 2026-10-09 through 2026-11-09, with no
+NULL transaction IDs, account IDs, amounts, or timestamps. These Landing
+findings were addressed in iteration 54 below.
+
+### Iteration 53. Create local Gold consumer models
+
+**Goal:** prepare a stable Gold projection of the Silver star schema and add
+the account/day dataset needed by the exercise's tier-alignment report.
+
+**Why:** Silver owns conformed history and event-time attribution. Gold should
+provide an explicit, consumer-facing projection rather than duplicate or
+redefine that logic. The daily account snapshot is a different fact from the
+transaction ledger: each row represents one account at the end of one
+snapshot date.
+
+Configure Gold tables in [dbt_project.yml](../dbt_project.yml):
+
+```yaml
+vars:
+  gold_tier_gold_threshold: 2000
+  gold_tier_platinum_threshold: 5000
+  gold_snapshot_end_date: '2026-11-09'
+
+models:
+  dbt_oyster_path:
+    gold:
+      +schema: gold
+      +materialized: table
+```
+
+The thresholds are configurable starting values from the exercise SQL, not
+approved business policy. Platinum must be greater than Gold; dbt compilation
+rejects invalid threshold ordering.
+
+The daily snapshot end date is an explicit reporting parameter, defaulting to
+`2026-11-09`, the latest date used by the generated example data. The model
+does not use the current date. It keeps daily account snapshots from the first
+transaction date through the configured end date, bounded by the latest
+transaction date in the fact. This preserves daily history while keeping the
+exercise's as-of date stable when the project is run later.
+
+Create explicit `ref()` projections for the customer, account, debit-card,
+date, and time dimensions, plus the transaction fact:
+
+| Gold model | Grain/purpose |
+|---|---|
+| `gold_dim_customer` | Silver customer SCD2 versions for consumption |
+| `gold_dim_account` | Silver account SCD2 versions for consumption |
+| `gold_dim_debitcard` | Silver debit-card SCD2 versions for consumption |
+| `gold_dim_date`, `gold_dim_time` | Shared reporting calendar and clock |
+| `gold_fct_transaction` | One row per source transaction |
+| `gold_fct_account_tier_daily_snapshot` | One row per active account and snapshot date |
+
+Explicit column lists are intentional: they stabilize the reporting contract
+and prevent an upstream schema addition from silently changing the Gold
+interface. The transaction fact retains the Silver event-time keys. It does
+not invent a card key, because the transaction source contains no card ID.
+
+The account/day snapshot uses the account, customer, and active-card SCD2
+versions valid at the end of the snapshot day. Intervals remain half-open,
+`[valid_from, valid_to)`. Rolling spend includes the snapshot date and the
+previous 29 calendar days:
+
+```sql
+transactions.transaction_timestamp >= dateadd(
+    day, -29, cast(snapshot_date as datetime2(6))
+)
+and transactions.transaction_timestamp < dateadd(
+    day, 1, cast(snapshot_date as datetime2(6))
+)
+```
+
+Missing cards, missing tiers, and unrecognized tiers are exposed as statuses;
+they are not silently changed to `Standard`. Candidate flags are NULL when a
+valid active tier cannot be compared. A source-window flag is provided for
+report filtering, but it does not prove upstream source completeness.
+
+**Decision points:**
+
+- **Transaction snapshot versus periodic snapshot:** keep transactions at
+  transaction grain for event-level analysis; use the separate daily
+  account-grain snapshot for daily rolling-spend/tier comparisons.
+- **Snapshot reporting date:** configure `gold_snapshot_end_date` for the
+  report's intended as-of date. Use `2026-11-09` for the generated exercise
+  data; do not substitute today's date.
+- **Account/card relationship:** the current data supports one active card per
+  account. The model still avoids selecting an arbitrary card; its grain test
+  fails if multiple active cards create duplicate account/day rows.
+- **Thresholds:** use 2,000/5,000 only as provisional configurable values until
+  the business owner confirms amounts, currency, and tier-transition policy.
+- **Aggregate metrics:** keep total-account counts and mismatch rates out of
+  the row-level fact. Define them as Power BI measures so filters and the
+  selected snapshot date control aggregation.
+
+**Quality checks:** YAML tests cover required/unique keys, dimension
+relationships, tier/status values, and fact grain. Singular tests check one
+row per account/date, the rolling-window sum, tier classification, and
+event-date SCD2 key alignment, and the configured snapshot end date. These
+tests are executable checks, not a substitute for a successful live build.
+
+**Local acceptance:** `dbt parse` and `dbt ls --select path:models/gold
+path:tests/gold` recognize the Gold resources. A live Gold compile/build is
+not acceptance yet: the upstream Landing contract and Silver relations must
+first be repaired and pass their gates. No Gold data has been published.
+
+**Next step:** run the upstream dbt acceptance tests against the updated
+Landing. If they pass, build and validate Bronze/Silver in dependency order
+before attempting Gold. Do not skip directly to Gold or treat a passing local
+parse as proof of live data quality.
+
+### Iteration 54. Complete the Landing source contract
+
+**Goal:** ensure every Landing source table exists with the batch, load, and
+source-file metadata required by dbt snapshots, freshness checks, and lineage.
+
+**Why:** adding only the missing customer-address table would leave the other
+source tables without the `meta_batch_timestamp` required by the shared dbt
+source freshness configuration. The loader already defines all five source
+entities and attaches metadata; selecting entities explicitly lets the
+missing table and the existing four tables be refreshed in separate,
+controlled writes.
+
+**Step 1 — Load customer address only.** Run the loader with
+`p_entities=CustomerAdress`. The spelling follows the source CSV prefix; the
+destination is `dbo.ld_oys_customeraddress`. This creates the missing table
+without overwriting the other four Landing tables.
+
+**Step 2 — Add metadata to the other four tables.** Run the loader with
+`p_entities=Customer,Account,DebitCard,Transaction_Ledger`. The overwrite is
+limited to those four full-state/ledger Landing tables and uses the same latest
+batch. The customer-address table is not rewritten in this step.
+
+**Step 3 — Verify the Landing contract.** Read the table catalog and bounded
+aggregates; confirm all five tables exist, all three metadata columns are
+present, and every table reports the same `meta_batch_timestamp`.
+
+**Observed acceptance result:** both loader runs completed. The read-only
+verification returned:
+
+| Landing table | Rows | Batch timestamp | Source files |
+|---|---:|---|---:|
+| `ld_oys_customer` | 102 | `2026-11-17 08:00:03` | 1 |
+| `ld_oys_customeraddress` | 194 | `2026-11-17 08:00:03` | 1 |
+| `ld_oys_account` | 102 | `2026-11-17 08:00:03` | 1 |
+| `ld_oys_debitcard` | 102 | `2026-11-17 08:00:03` | 1 |
+| `ld_oys_transaction_ledger` | 4,840 | `2026-11-17 08:00:03` | 1 |
+
+All five tables contain `meta_batch_timestamp`, `meta_load_timestamp`, and
+`meta_source_file`. No dbt snapshots, dbt models, or Gold data were run or
+changed by this step.
+
+**Next step:** run `silver_upstream_checks`. Stop on any failure; only after
+the upstream tests pass should the development Bronze snapshots/ledger and
+Silver acceptance build be considered.
+
+### Iteration 55. Pass the upstream gate and build Bronze history
+
+**Goal:** prove that Landing and Bronze satisfy every assumption Silver relies
+on before any Silver model is written.
+
+**Why:** a green Silver build on top of incomplete Bronze would only move the
+problem downstream. The `silver_upstream_checks` selector is the agreed gate.
+
+**Step 1 — Run the gate first, read-only.**
+
+```powershell
+cd dbt_oyster_path
+& '..\.venv\Scripts\dbt.exe' test --selector silver_upstream_checks --target dev --profiles-dir .
+```
+
+All Landing source tests passed. Tests on the account and debit-card snapshots
+could not run because those snapshot tables did not exist yet: a missing
+relation, not a data defect.
+
+**Step 2 — Build all four snapshots from the same batch.**
+
+```powershell
+& '..\.venv\Scripts\dbt.exe' snapshot --threads 1 --target dev --profiles-dir .
+```
+
+All four snapshots run, not only the missing two, so every SCD2 history has
+observed the same Landing batch. Snapshots are idempotent: unchanged rows
+open no new versions.
+
+**Decision point — parallelism on Fabric Warehouse.** With `threads: 4`,
+concurrent snapshot transactions can deadlock on Warehouse metadata locks.
+Use `--threads 1` for snapshot and build runs that write several tables;
+the volume here makes the cost negligible.
+
+**Observed acceptance result:** gate 27/27 passed. Bronze holds 102 / 194 /
+102 / 102 current versions (customer / address / account / card), all with
+`dbt_valid_from = 2026-11-17 08:00:03` and `dbt_valid_to = 9999-12-31`.
+
+### Iteration 56. Choose an initial-load history policy
+
+**Goal:** let events that happened before the first observation resolve to a
+dimension version, without hiding that this is an assumption.
+
+**Why:** every first version starts at the batch time (2026-11-17), but the
+transactions span 2026-10-09 to 2026-11-09. Under strict observation
+semantics (Iteration 49) every transaction would be `no_account_history`, and
+the Gold snapshot would carry no tier for any account. The sources contain no
+business effective date (for example an account opening date) to use instead.
+
+**Decision point — how to treat time before the first observation:**
+
+| Option | Behaviour | When to use |
+|---|---|---|
+| A. Strict observation | No coverage before the first snapshot; facts stay unresolved | Audit-grade history where assumptions are unacceptable |
+| B. Inferred initial history (chosen) | Each key's first version starts at `0001-01-01` and is flagged | Initial load of an existing system (Kimball initial-load practice) |
+| C. Rewrite the batch timestamp | Pretend the batch arrived earlier | Never: it falsifies lineage metadata |
+
+**Change 1 — make the policy a project setting** in `dbt_project.yml`:
+
+```yaml
+vars:
+  # Initial-load policy: extend each business key's first observed version
+  # back to 0001-01-01 and flag it with is_inferred_start.
+  silver_infer_initial_history: true
+```
+
+**Change 2 — define the policy once** in `macros/initial_history_policy.sql`.
+`version_group = 1` is the first observed version of a business key:
+
+```sql
+{% macro inferred_valid_from(alias) %}
+    {%- if var('silver_infer_initial_history', false) -%}
+    case when {{ alias }}.version_group = 1
+        then cast('0001-01-01' as datetime2(6))
+        else {{ alias }}.valid_from
+    end
+    {%- else -%}
+    {{ alias }}.valid_from
+    {%- endif -%}
+{% endmacro %}
+
+{% macro inferred_start_flag(alias) %}
+    {%- if var('silver_infer_initial_history', false) -%}
+    cast(case when {{ alias }}.version_group = 1 then 1 else 0 end as bit)
+    {%- else -%}
+    cast(0 as bit)
+    {%- endif -%}
+{% endmacro %}
+```
+
+**Change 3 — apply it in both dimension builders**
+(`coalesce_observed_dimension` for account/card, and `dim_customer`):
+
+```sql
+    {{ inferred_valid_from('versions') }} as valid_from,
+    versions.valid_to,
+    versions.valid_from as observed_valid_from,
+    {{ inferred_start_flag('versions') }} as is_inferred_start,
+```
+
+Unknown members get `observed_valid_from = 0001-01-01` and
+`is_inferred_start = 0`. The Gold dimensions project both new columns, and
+`not_null` tests cover them in Silver and Gold.
+
+**Design rules behind the change:**
+
+- Only the first version is extended. Later changes keep their observed start,
+  so real SCD2 history is not distorted.
+- The surrogate key is still hashed from the *observed* start. Keys therefore
+  stay stable if the policy is switched off.
+- Inferred data is always flagged (`is_inferred_start`) and the true
+  observation time is preserved (`observed_valid_from`), so reports can
+  separate assumed from observed coverage.
+
+**Acceptance:** `dbt parse` passes and the compiled SQL contains the
+`version_group = 1` branch.
+
+### Iteration 57. Migrate the protected development ledger schema
+
+**Goal:** bring the development transaction ledger onto the current Landing
+contract, including `meta_batch_timestamp`.
+
+**Why:** the ledger was created before Iteration 54 and is append-only with
+`full_refresh=false`. That protection is deliberate, but it also means dbt will
+not add the new column. All 4,840 existing ledger rows are present in Landing,
+so rebuilding loses no events.
+
+**Decision point — schema change on a protected append-only table:**
+
+| Option | Effect |
+|---|---|
+| Dev-only drop and rebuild (chosen for dev) | Clean table, metadata on every row; protection stays in the model |
+| `on_schema_change='append_new_columns'` | Column added, but existing rows keep NULL metadata |
+| Production | Controlled migration: `ALTER TABLE` plus a reviewed backfill, never a drop |
+
+**Change — a guarded development macro** in `macros/dev_drop_relation.sql`:
+
+```sql
+{% macro dev_drop_relation(schema, identifier) %}
+    {% if target.name != 'dev' %}
+        {{ exceptions.raise_compiler_error("dev_drop_relation is allowed only on target 'dev', got '" ~ target.name ~ "'.") }}
+    {% endif %}
+    {% if not schema.startswith('dev_') %}
+        {{ exceptions.raise_compiler_error("dev_drop_relation only drops relations in dev_* schemas, got '" ~ schema ~ "'.") }}
+    {% endif %}
+    {% set relation = adapter.get_relation(database=target.database, schema=schema, identifier=identifier) %}
+    {% if relation is none %}
+        {{ log("Relation " ~ schema ~ "." ~ identifier ~ " does not exist; nothing to drop.", info=true) }}
+    {% else %}
+        {% do adapter.drop_relation(relation) %}
+        {{ log("Dropped " ~ relation, info=true) }}
+    {% endif %}
+{% endmacro %}
+```
+
+Two guards (target name and `dev_` schema prefix) make an accidental
+production drop a compile error.
+
+```powershell
+& '..\.venv\Scripts\dbt.exe' run-operation dev_drop_relation --args "{schema: dev_bronze, identifier: bz_oys_transaction_ledger}" --target dev --profiles-dir .
+& '..\.venv\Scripts\dbt.exe' run --select bz_oys_transaction_ledger --target dev --profiles-dir .
+```
+
+**Acceptance:** the ledger is rebuilt with 4,840 rows and all three metadata
+columns.
+
+### Iteration 58. Build Silver and Gold, then reconcile independently
+
+**Goal:** build both layers and prove that the Gold result is correct, not only
+that the commands succeeded.
+
+```powershell
+& '..\.venv\Scripts\dbt.exe' build --selector silver --threads 1 --target dev --profiles-dir .
+& '..\.venv\Scripts\dbt.exe' build --select path:models/gold path:tests/gold --threads 1 --target dev --profiles-dir .
+```
+
+`dbt build` runs each model's tests right after the model, so a failing
+dimension stops its dependants.
+
+**Observed acceptance result:**
+
+| Check | Result |
+|---|---|
+| Silver build | 129/129 passed |
+| Gold build | 72/72 passed |
+| `fct_transaction` lookup status | 4,840 `matched` / `matched` |
+| Inferred first versions | 102 account, 102 customer, 102 card |
+| Daily snapshot span | 2026-10-09 to 2026-11-09, 32 days |
+| Accounts per snapshot day | 102 on every day (3,264 rows) |
+
+Tier distribution on 2026-11-09 (thresholds 2,000 / 5,000, not yet
+business-approved):
+
+| Actual tier | Calculated tier | Alignment | Accounts |
+|---|---|---|---:|
+| Gold | Standard | misaligned (downgrade) | 22 |
+| Gold | Platinum | misaligned (upgrade) | 17 |
+| Gold | Gold | aligned | 17 |
+| Platinum | Platinum | aligned | 13 |
+| Standard | Standard | aligned | 13 |
+| Standard | Gold | misaligned (upgrade) | 10 |
+| Platinum | Gold | misaligned (downgrade) | 10 |
+
+**Independent reconciliation:** recompute the 30-day spend for 2026-11-09
+directly from Silver, outside the Gold model logic, and compare:
+
+```sql
+with ref_spend as (
+  select account_id, sum(cast(amount as decimal(38,4))) as spend
+  from dev_silver.fct_transaction
+  where transaction_timestamp >= '2026-10-11'
+    and transaction_timestamp <  '2026-11-10'
+  group by account_id
+), g as (
+  select account_id, rolling_30_day_spend, calculated_spending_tier
+  from dev_gold.gold_fct_account_tier_daily_snapshot
+  where snapshot_date = '2026-11-09'
+)
+select count(*) as accounts,
+  sum(case when abs(coalesce(r.spend, 0) - g.rolling_30_day_spend) > 0.01
+      then 1 else 0 end) as spend_mismatch,
+  sum(case when (case when coalesce(r.spend, 0) >= 5000 then 'Platinum'
+                      when coalesce(r.spend, 0) >= 2000 then 'Gold'
+                      else 'Standard' end) <> g.calculated_spending_tier
+      then 1 else 0 end) as tier_mismatch
+from g
+left join ref_spend as r on r.account_id = g.account_id;
+```
+
+Result: 102 accounts, 0 spend mismatches, 0 tier mismatches; both sides total
+389,823.91. Early snapshot days have `has_full_30_day_source_window = 0`
+because the data starts on 2026-10-09; report pages should filter or label them.
+
+**Next step:** make the plain full build reliable (Iteration 59), then build
+the Power BI semantic model on the Gold tables.
+
+### Iteration 59. Make the default full build deterministic
+
+**Goal:** `dbt build --profiles-dir .` must succeed without extra flags, so
+every developer and scheduler runs the same way.
+
+**Why:** with the original `threads: 4`, the full build (233 nodes) failed with
+deadlock victims on snapshots, Silver staging views, and Gold tables. Passing
+`--threads 1` by hand worked, but a safety setting that depends on remembering
+a flag is not a safety setting. Concurrency belongs in the profile.
+
+**Decision point — parallelism versus reliability:**
+
+| Option | Trade-off |
+|---|---|
+| `threads: 1` (chosen) | Serial DDL, no lock contention; about 3 minutes for the full project |
+| `threads: 4` with retries | Faster when it works, but failures cascade into skipped dependants |
+| Split runs (snapshots serial, models parallel) | More orchestration for little gain at this volume |
+
+**Change** in `profiles.yml`, for both `dev` and `prod`:
+
+```yaml
+      threads: 1  # Fabric Warehouse deadlocks on parallel DDL; see walkthrough Iteration 59
+```
+
+Revisit when data volume makes run time matter; measure deadlocks before
+raising the value.
+
+**Observed acceptance result:** `dbt build --profiles-dir .` reports
+`Concurrency: 1 threads (target='dev')` and passes 233/233 (snapshots, Bronze,
+Silver, Gold, and all tests).
+
+**Next step:** build the Power BI semantic model on the Gold tables and author
+the report described at the end of the exercise document.
+
+### Iteration 60. Design the semantic model and report (plan, not yet built)
+
+**Goal:** agree on the semantic model, measures, and report layout before
+creating anything, so the report reproduces verifiable numbers for the
+2026-11-09 as-of date.
+
+**Why:** the exercise document's final chapter (Semantic Model & Power BI
+Report Creation) targets a differently named table set and quotes example
+figures (37.0%, "27 Platinum vs 10 Gold") from another dataset. Mapping it to
+our Gold contract first prevents wrong relationships and, above all, wrong
+aggregation of a snapshot fact.
+
+**Status:** design only. No semantic model, measure, or report exists yet.
+
+#### Build sequence
+
+| # | Step | Where |
+|---|---|---|
+| 1 | Create a Direct Lake semantic model `sm_OysterBank_Analytics` from the `dev_gold` schema | Fabric workspace, Warehouse → New semantic model |
+| 2 | Add the tables with friendly names | Table mapping below |
+| 3 | Create 1:N relationships with single direction; mark the date table | Model view |
+| 4 | Hide technical columns; set formats | Model view |
+| 5 | Create measures in a dedicated `_Measures` table with display folders | Measures below |
+| 6 | Build the report page: KPI cards, 100% stacked bar, donut, date slicer | Report layout below |
+| 7 | Security (RLS) | Separate decision, see decision points |
+
+#### Table mapping
+
+| Model table | Source (`dev_gold`) | Role |
+|---|---|---|
+| **Account Tier Snapshot** | `gold_fct_account_tier_daily_snapshot` | Main fact; grain: account × day |
+| Account | `gold_dim_account` | SCD2 dimension |
+| Customer | `gold_dim_customer` | SCD2 dimension |
+| Debit Card | `gold_dim_debitcard` | SCD2 dimension |
+| Date | `gold_dim_date` | Date table (Mark as date table on `calendar_date`) |
+| *(optional)* Transaction, Time | `gold_fct_transaction`, `gold_dim_time` | Later transaction drill-down page |
+
+The document's `gold_fact_periodic_spend_snapshot` corresponds to our
+`gold_fct_account_tier_daily_snapshot`: the purpose-made table without
+aggregate metrics. Aggregation happens in the measures.
+
+**Relationships** (all one-to-many, single direction, dimension filters fact):
+
+```
+Date[date_key]                  1 ──► N  Account Tier Snapshot[date_key]
+Account[account_key]            1 ──► N  Account Tier Snapshot[account_key]
+Customer[customer_key]          1 ──► N  Account Tier Snapshot[customer_key]
+Debit Card[debitcard_key]       1 ──► N  Account Tier Snapshot[debitcard_key]
+```
+
+A read-only check confirmed that the snapshot fact has no NULL keys and no
+orphan keys against any of the four dimensions.
+
+**Hide:** every `*_key` column, `valid_from`, `valid_to`,
+`observed_valid_from`, the `meta_*` columns, and `is_unknown`. Keep
+`is_inferred_start` visible so users can see where a version start was assumed.
+
+#### Measures
+
+**Key rule — the snapshot fact is semi-additive.** The document's
+`Total Spend = SUM(Rolling30DaySpend)` would add the rolling totals of every
+day in the selection. Likewise a `DISTINCTCOUNT` filtered on `Misaligned`
+would count an account that was misaligned on *any* of the 32 days. Every
+measure therefore evaluates on the **last snapshot date** of the current
+selection.
+
+```dax
+-- Display folder: 0 Context
+Latest Snapshot Date =
+CALCULATE (
+    MAX ( 'Account Tier Snapshot'[snapshot_date] ),
+    ALL ( 'Account Tier Snapshot' ),
+    VALUES ( 'Date'[calendar_date] )
+)
+
+-- Display folder: 1 Cardholders
+Total Cardholders =
+VAR _asOf = [Latest Snapshot Date]
+RETURN
+    CALCULATE (
+        DISTINCTCOUNT ( 'Account Tier Snapshot'[account_id] ),
+        'Date'[calendar_date] = _asOf,
+        KEEPFILTERS ( 'Account Tier Snapshot'[actual_card_status] = "active" )
+    )
+
+Misaligned Cardholders =
+CALCULATE (
+    [Total Cardholders],
+    KEEPFILTERS ( 'Account Tier Snapshot'[alignment_status] = "misaligned" )
+)
+
+Aligned Cardholders =
+CALCULATE (
+    [Total Cardholders],
+    KEEPFILTERS ( 'Account Tier Snapshot'[alignment_status] = "aligned" )
+)
+
+-- Display folder: 2 Tier alignment
+Tier Mismatch Rate =
+DIVIDE ( [Misaligned Cardholders], [Total Cardholders] )
+
+Upgrade Candidates =
+CALCULATE (
+    [Total Cardholders],
+    KEEPFILTERS ( 'Account Tier Snapshot'[upgrade_candidate] = TRUE () )
+)
+
+Downgrade Candidates =
+CALCULATE (
+    [Total Cardholders],
+    KEEPFILTERS ( 'Account Tier Snapshot'[downgrade_candidate] = TRUE () )
+)
+
+-- Display folder: 3 Spend
+Rolling 30-Day Spend =
+VAR _asOf = [Latest Snapshot Date]
+RETURN
+    CALCULATE (
+        SUM ( 'Account Tier Snapshot'[rolling_30_day_spend] ),
+        'Date'[calendar_date] = _asOf
+    )
+
+Avg Rolling Spend per Cardholder =
+DIVIDE ( [Rolling 30-Day Spend], [Total Cardholders] )
+```
+
+**Why these patterns:**
+
+- `ALL(fact)` plus `VALUES(Date)`: the "latest day" depends only on the date
+  filter. A legend segment (for example `aligned`) can never fall back to an
+  earlier day just because it has no rows on the last day.
+- `KEEPFILTERS`: the `alignment_status` legend filter in the 100% stacked bar
+  is intersected, not overwritten, so the bars split correctly.
+- `DIVIDE` without a third argument returns blank rather than a misleading
+  0% when there is no data.
+- Formats: `Tier Mismatch Rate` as `0.0%`, counts as `#,0`, spend as `#,0.00`.
+
+#### Report layout and expected results (as-of 2026-11-09)
+
+Add a `Date[calendar_date]` slicer (Between), defaulting to 2026-10-09 –
+2026-11-09. All measures then show the 2026-11-09 state.
+
+| Visual | Fields | Expected value |
+|---|---|---|
+| Card "TOTAL ACTIVE CARDHOLDERS" (soft blue) | `[Total Cardholders]` | **102** |
+| Card "MISMATCHED TIER RATE" (soft red, %) | `[Tier Mismatch Rate]` | **57.8%** (59/102) |
+| Card "UPGRADE CANDIDATES" (soft green) | `[Upgrade Candidates]` | **27** |
+| *(recommended 4th)* Card "DOWNGRADE CANDIDATES" | `[Downgrade Candidates]` | **32** |
+
+**100% stacked bar chart (bottom left).** Y-axis
+`Account Tier Snapshot[actual_card_tier]`, X-axis `[Total Cardholders]`,
+legend `Account Tier Snapshot[alignment_status]`, data labels as percentages.
+
+| Actual tier | Total | Misaligned | Rate |
+|---|---:|---:|---:|
+| Gold | 56 | 39 | 69.6% |
+| Platinum | 23 | 10 | 43.5% |
+| Standard | 23 | 10 | 43.5% |
+
+**Donut chart (bottom right).** Legend
+`Account Tier Snapshot[calculated_spending_tier]`, values
+`[Misaligned Cardholders]`. The donut has no native centre label: place a
+transparent card showing `[Tier Mismatch Rate]` over its centre.
+
+| Calculated tier | Misaligned |
+|---|---:|
+| Standard (down from Gold) | 22 |
+| Gold (10 up from Standard, 10 down from Platinum) | 20 |
+| Platinum (up from Gold) | 17 |
+
+**Recommended addition:** a line chart of `[Tier Mismatch Rate]` over
+`Date[calendar_date]` for all 32 days. It shows why the daily snapshot exists:
+the mismatch rate changes from day to day.
+
+The document's 37.0% and "27 Platinum vs 10 Gold" are illustrative figures
+from another dataset. The values above, derived from our Gold data for
+2026-11-09, are the acceptance criteria.
+
+#### Decision points
+
+| Decision | Options | Recommendation |
+|---|---|---|
+| Direct Lake mode | *On OneLake*: no DirectQuery fallback, fast. *On SQL endpoint*: honours Warehouse RLS/DDM, but falls back to DirectQuery | **On OneLake**, with security in the model |
+| Dynamic data masking on `TaxID` (document) | Source has no `TaxID` column | Skip and record the gap |
+| RLS on `CustomerType` (document) | Source has no such field. Skip, or a demo role on `permanent_country` | Skip in the first iteration; add a demo role as a separate step if required |
+| Full 30-day window | On 2026-11-09, `has_full_30_day_source_window = 1` for 87 of 102 accounts; the document's KPIs count all accounts | Count all 102; expose the flag as a slicer or tooltip |
+| Source schema | `dev_gold` now | Bind production only after fixing the prod target in `profiles.yml` |
+| Transaction page | Include `Transaction` fact now or later | Later, once the first page is accepted |
+
+#### How it will be built
+
+Create the model (tables, relationships, measures, formats) directly in the
+workspace, then run DAX queries to confirm the measures return the expected
+values above before any visual is built. Report visuals are assembled in the
+Fabric report editor with the field assignments listed here.
+
+**Next step:** create the semantic model as designed (Direct Lake on OneLake,
+without RLS/DDM) and validate the measures with DAX queries.
 
 ## What we deliberately have not implemented
 
-- Additional facts (for example balances), remaining business rules, and Gold
-  reporting models. The transaction star and its relationship tests are implemented.
+- Additional facts (for example balances), remaining business rules, and
+  business approval of Gold tier thresholds/transition policy.
+- Production Silver and Gold builds, Gold data publication, and Power BI
+  semantic model/report authoring.
+- A production schema-migration procedure for protected append-only tables.
 - A delivery completion manifest and expected-count/anomaly validation.
 - Cross-table atomic publication or pinned source versions.
 - An enforced snapshot batch-order/high-water mark.
@@ -2802,6 +3558,8 @@ These are real next decisions, not guarantees supplied by the existing tests.
 | Files under a local driver path | Attach the Lakehouse; local `/lakehouse/default` assumptions are not proof of OneLake persistence |
 | Unused `models.dbt_oyster_path.example` | Preserved starter configuration has no matching resource; unrelated to snapshot correctness |
 | `dbt compile` needs a connection | Adapter introspection and `is_incremental()` can require live relation lookup; parse success is not a live SQL check |
+| Transaction deadlocked, chosen as victim | Concurrent writes on Fabric Warehouse; the profile uses `threads: 1` (Iteration 59) |
+| Invalid column on an append-only model | The protected table predates a source-contract change; migrate its schema (Iteration 57) |
 
 ## Final source index
 
@@ -2817,6 +3575,12 @@ These are real next decisions, not guarantees supplied by the existing tests.
 - [Landing batch test](../tests/landing/assert_landing_single_batch.sql)
 - [Current snapshot version test](../tests/bronze/assert_bronze_current_keys_unique.sql)
 - [Transaction immutability test](../tests/bronze/assert_transaction_events_immutable.sql)
+- [Gold dimensions, facts, and snapshot tests](../models/gold/)
+- [Gold account-tier snapshot model](../models/gold/gold_fct_account_tier_daily_snapshot.sql)
+- [Gold account-tier snapshot tests](../tests/gold/)
+- [Gold snapshot end-date test](../tests/gold/assert_gold_snapshot_end_date.sql)
+- [Initial-load history policy macros](../macros/initial_history_policy.sql)
+- [Guarded development drop macro](../macros/dev_drop_relation.sql)
 
 **The development principle:** first name the data, then describe it, then test
 the assumptions, then store history, then test that history. Add shared behaviour

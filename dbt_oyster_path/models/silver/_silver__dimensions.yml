@@ -51,8 +51,8 @@ models:
     description: >
       Business SCD2 customer versions with Permanent, Mailing, and Billing
       address groups. Adjacent equal states are coalesced without bridging
-      coverage gaps. Times describe observations, not guaranteed effective
-      business history. Includes deletion versions and one explicit Unknown member.
+      coverage gaps. Times describe observations; the first version may be extended to 0001-01-01
+      by the initial-load policy (is_inferred_start). Includes deletion versions and one explicit Unknown member.
       Requires passing upstream history, address, and state reconciliation tests.
     columns:
       - name: customer_key
@@ -73,10 +73,18 @@ models:
       - name: last_name
         description: Customer last name for this observed version.
       - name: valid_from
-        description: Inclusive version start.
+        description: Inclusive version start; 0001-01-01 for an inferred initial version.
         data_tests: [not_null]
       - name: valid_to
         description: Exclusive version end; current versions use 9999-12-31.
+        data_tests: [not_null]
+      - name: observed_valid_from
+        description: First Bronze observation of this version; source of the version key.
+        data_tests: [not_null]
+      - name: is_inferred_start
+        description: >
+          1 when valid_from was extended to 0001-01-01 by the initial-load policy
+          (var silver_infer_initial_history); attributes before observation are assumed.
         data_tests: [not_null]
       - name: is_current
         description: Open-ended version flag, including current deletion tombstones.
@@ -116,10 +124,18 @@ models:
               config:
                 where: "is_unknown = 0"
       - name: valid_from
-        description: Inclusive observation-version start.
+        description: Inclusive version start; 0001-01-01 for an inferred initial version.
         data_tests: [not_null]
       - name: valid_to
         description: Exclusive observation-version end; current uses 9999-12-31.
+        data_tests: [not_null]
+      - name: observed_valid_from
+        description: First Bronze observation of this version; source of the version key.
+        data_tests: [not_null]
+      - name: is_inferred_start
+        description: >
+          1 when valid_from was extended to 0001-01-01 by the initial-load policy
+          (var silver_infer_initial_history); attributes before observation are assumed.
         data_tests: [not_null]
       - name: is_current
         description: Open-ended version flag, including tombstones.
@@ -156,10 +172,18 @@ models:
         description: Card activity flag, distinct from deletion.
         data_tests: [not_null]
       - name: valid_from
-        description: Inclusive observation-version start.
+        description: Inclusive version start; 0001-01-01 for an inferred initial version.
         data_tests: [not_null]
       - name: valid_to
         description: Exclusive observation-version end; current uses 9999-12-31.
+        data_tests: [not_null]
+      - name: observed_valid_from
+        description: First Bronze observation of this version; source of the version key.
+        data_tests: [not_null]
+      - name: is_inferred_start
+        description: >
+          1 when valid_from was extended to 0001-01-01 by the initial-load policy
+          (var silver_infer_initial_history); attributes before observation are assumed.
         data_tests: [not_null]
       - name: is_current
         description: Open-ended version flag, including tombstones.

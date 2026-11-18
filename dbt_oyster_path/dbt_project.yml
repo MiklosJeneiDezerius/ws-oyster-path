@@ -21,6 +21,12 @@ snapshot-paths: ["snapshots"]
 vars:
   silver_date_start: '2020-01-01'
   silver_date_end: '2035-12-31'
+  # Initial-load policy: extend each business key's first observed version
+  # back to 0001-01-01 and flag it with is_inferred_start.
+  silver_infer_initial_history: true
+  gold_tier_gold_threshold: 2000
+  gold_tier_platinum_threshold: 5000
+  gold_snapshot_end_date: '2026-11-09'
 
 clean-targets:         # directories to be removed by `dbt clean`
   - "target"
@@ -43,6 +49,9 @@ models:
       +materialized: table
       staging:
         +materialized: view
+    gold:
+      +schema: gold
+      +materialized: table
 
 # Bronze layer = historized (SCD2) copies of the landing tables, built with dbt snapshots.
 snapshots:

@@ -72,8 +72,10 @@ select
     {% for attribute in attributes %}
     states.{{ attribute }},
     {% endfor %}
-    versions.valid_from,
+    {{ inferred_valid_from('versions') }} as valid_from,
     versions.valid_to,
+    versions.valid_from as observed_valid_from,
+    {{ inferred_start_flag('versions') }} as is_inferred_start,
     cast(
         case when versions.valid_to = cast('9999-12-31' as datetime2(6))
             then 1 else 0
@@ -99,6 +101,8 @@ select
     {% endfor %}
     cast('0001-01-01' as datetime2(6)) as valid_from,
     cast('9999-12-31' as datetime2(6)) as valid_to,
+    cast('0001-01-01' as datetime2(6)) as observed_valid_from,
+    cast(0 as bit) as is_inferred_start,
     cast(1 as bit) as is_current,
     cast(1 as bit) as is_unknown
 {% endif %}
