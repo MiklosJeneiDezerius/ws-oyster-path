@@ -116,7 +116,7 @@
         "typeProperties": {
           "isSequential": true,
           "items": {
-            "value": "@if(empty(pipeline().parameters.p_batch_folder), activity('flt_BatchFolders').output.value, createArray())",
+            "value": "@if(empty(pipeline().parameters.p_batch_folder), activity('flt_BatchFolders').output.value, json('[]'))",
             "type": "Expression"
           },
           "activities": [

@@ -4078,7 +4078,7 @@ The key expressions:
 v_load_date        @convertFromUtc(utcNow(), 'Central Europe Standard Time', 'yyyy-MM-dd HH:mm:ss')
 v_batch_folder     @coalesce(pipeline().parameters.p_batch_folder, '')
 batch folders      @and(equals(item().type, 'Folder'), equals(length(item().name), 14))
-resolve items      @if(empty(pipeline().parameters.p_batch_folder), activity('flt_BatchFolders').output.value, createArray())
+resolve items      @if(empty(pipeline().parameters.p_batch_folder), activity('flt_BatchFolders').output.value, json('[]'))
 newer?             @greater(item().name, variables('v_batch_folder'))
 active tables      @and(equals(item().is_active, '1'), equals(item().is_active_delta, '1'))
 ```
