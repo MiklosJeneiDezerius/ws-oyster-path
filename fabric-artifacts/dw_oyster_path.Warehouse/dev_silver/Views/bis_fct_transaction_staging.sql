@@ -1,4 +1,4 @@
-create view [dev_silver].[stg_oys_transaction_ledger] as select
+create view [dev_silver].[bis_fct_transaction_staging] as select
     TransactionID as transaction_id_raw,
     nullif(trim(TransactionID), '') as transaction_id,
     AccountID as account_id_raw,
@@ -12,6 +12,6 @@ create view [dev_silver].[stg_oys_transaction_ledger] as select
     meta_batch_timestamp,
     meta_load_timestamp,
     meta_source_file
-from [dw_oyster_path].[dev_bronze].[bz_oys_transaction_ledger];
+from [dw_oyster_path].[dev_bronze].[b_oys_transaction_ledger];
 
 GO

@@ -1,4 +1,4 @@
-create view [dev_silver].[stg_oys_account] as select
+create view [dev_silver].[bis_dim_account_staging] as select
     AccountID as account_id_raw,
     nullif(trim(AccountID), '') as account_id,
     CustomerID as customer_id_raw,
@@ -17,6 +17,6 @@ create view [dev_silver].[stg_oys_account] as select
     meta_batch_timestamp,
     meta_load_timestamp,
     meta_source_file
-from [dw_oyster_path].[dev_bronze].[bz_oys_account];
+from [dw_oyster_path].[dev_bronze].[b_oys_account];
 
 GO

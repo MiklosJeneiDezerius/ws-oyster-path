@@ -1,4 +1,4 @@
-CREATE TABLE [dev_gold].[gold_dim_customer] (
+CREATE TABLE [dev_gold].[g_dim_customer] (
     [customer_key]           VARCHAR (64)   NULL,
     [customer_id]            VARCHAR (8000) NULL,
     [first_name]             VARCHAR (8000) NULL,

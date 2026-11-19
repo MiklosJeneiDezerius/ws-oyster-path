@@ -1,4 +1,4 @@
-create view [dev_silver].[int_customer_states] as 
+create view [dev_silver].[bis_dim_customer_states] as 
 
 
 
@@ -47,28 +47,28 @@ select
     , billing.house_number as billing_house_number
         
     
-from [dw_oyster_path].[dev_silver].[int_customer_intervals] as timeline
-inner join [dw_oyster_path].[dev_silver].[stg_oys_customer] as customer
+from [dw_oyster_path].[dev_silver].[bis_dim_customer_intervals] as timeline
+inner join [dw_oyster_path].[dev_silver].[bis_dim_customer_staging] as customer
     on customer.customer_id = timeline.customer_id
    and timeline.valid_from >= customer.observed_valid_from
    and timeline.valid_from < customer.observed_valid_to
 
 
-left join [dw_oyster_path].[dev_silver].[stg_oys_customer_address] as permanent
+left join [dw_oyster_path].[dev_silver].[bis_dim_customer_address_staging] as permanent
     on permanent.customer_id = timeline.customer_id
    and permanent.address_type = 'Permanent'
    and permanent.is_deleted = 0
    and timeline.valid_from >= permanent.observed_valid_from
    and timeline.valid_from < permanent.observed_valid_to
 
-left join [dw_oyster_path].[dev_silver].[stg_oys_customer_address] as mailing
+left join [dw_oyster_path].[dev_silver].[bis_dim_customer_address_staging] as mailing
     on mailing.customer_id = timeline.customer_id
    and mailing.address_type = 'Mailing'
    and mailing.is_deleted = 0
    and timeline.valid_from >= mailing.observed_valid_from
    and timeline.valid_from < mailing.observed_valid_to
 
-left join [dw_oyster_path].[dev_silver].[stg_oys_customer_address] as billing
+left join [dw_oyster_path].[dev_silver].[bis_dim_customer_address_staging] as billing
     on billing.customer_id = timeline.customer_id
    and billing.address_type = 'Billing'
    and billing.is_deleted = 0

@@ -1,4 +1,4 @@
-CREATE TABLE [dev_silver].[dim_debitcard] (
+CREATE TABLE [dev_silver].[s_dim_debitcard] (
     [debitcard_key]       VARCHAR (64)   NULL,
     [card_id]             VARCHAR (8000) NULL,
     [account_id]          VARCHAR (8000) NULL,

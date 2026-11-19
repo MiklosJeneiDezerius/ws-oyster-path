@@ -22,7 +22,9 @@
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark"
+# META   "language_group": "synapse_pyspark",
+# META   "frozen": true,
+# META   "editable": false
 # META }
 
 # PARAMETERS CELL ********************
@@ -137,16 +139,15 @@ customers = [
 assert len(customers) == CUSTOMER_COUNT
 assert len({customer["CustomerID"] for customer in customers}) == CUSTOMER_COUNT
 
-<<<<<<< HEAD
 # A kontrollált változást a teljes alaplista elkészülte után alkalmazzuk.
 # Alternatíva lenne a seed megváltoztatása, de az a véletlen értékek nagy részét
 # lecserélné, így nem különítené el a kívánt üzleti változást a zajtól. A rögzített
 # névkészletből választott női ügyfél egyetlen vezetéknév-változása célzott
 # snapshot-próba; a változás kikapcsolva az alapadat érintetlen marad.
-=======
+
 # Change scenario: applied after generation without drawing random numbers, so every other value
 # (accounts, cards, transactions) stays identical to the baseline.
->>>>>>> origin/main
+
 FEMALE_FIRST_NAMES = {"Anna", "Eszter", "Juli", "Nora"}
 renamed_customer_id = None
 
@@ -247,15 +248,13 @@ assert all(
     for count, address_types in address_plan
 )
 
-<<<<<<< HEAD
 # A változáspróba az utolsó két ügyfél Permanent címét módosítja, nem a
 # névváltozással érintett ügyfélét. A cím azonosítója megmarad, így attribútum-
 # változásként jelenik meg, nem új címként; az új AddressID létrehozása nem
 # bizonyítaná a meglévő cím üzleti történetének SCD2-kezelését.
-=======
+
 # Change scenario: move the Permanent address of the last two customers (not the renamed one).
 # AddressID stays the same, so the snapshot records a new version of the existing address.
->>>>>>> origin/main
 if int(p_simulate_changes):
     relocated_customer_ids = [customer["CustomerID"] for customer in customers[-2:]]
     assert renamed_customer_id not in relocated_customer_ids
@@ -277,12 +276,9 @@ if int(p_simulate_changes):
             f"{address['Street']} {address['HouseNumber']}"
         )
 
-<<<<<<< HEAD
 # A CustomerAdress elírt forrás-prefixet a jelenlegi betöltési szerződés
 # részeként megtartjuk. A helyesírási javítás tisztább lenne, de fájlnév- és
 # entitásmódosítást igényelne a betöltőben is.
-=======
->>>>>>> origin/main
 file_name = f"CustomerAdress_{run_started_at:%Y%m%dT%H%M%S}.csv"
 customer_address_csv_path = os.path.join(output_dir, file_name)
 

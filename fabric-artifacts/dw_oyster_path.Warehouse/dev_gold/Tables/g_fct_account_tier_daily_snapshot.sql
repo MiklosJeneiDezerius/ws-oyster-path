@@ -1,4 +1,4 @@
-CREATE TABLE [dev_gold].[gold_fct_account_tier_daily_snapshot] (
+CREATE TABLE [dev_gold].[g_fct_account_tier_daily_snapshot] (
     [date_key]                      INT             NULL,
     [snapshot_date]                 DATE            NULL,
     [account_key]                   VARCHAR (64)    NULL,

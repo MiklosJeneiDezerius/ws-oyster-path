@@ -1,4 +1,4 @@
-CREATE TABLE [dev_silver].[dim_time] (
+CREATE TABLE [dev_silver].[s_dim_time] (
     [time_key]      INT      NULL,
     [time_of_day]   TIME (0) NULL,
     [hour_number]   INT      NULL,

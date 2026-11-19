@@ -10,6 +10,10 @@
             "type": "Expression"
           }
         },
+        "policy": {
+          "secureInput": false,
+          "secureOutput": false
+        },
         "name": "Set v_load_date",
         "dependsOn": []
       },
@@ -33,7 +37,8 @@
               },
               "type": "string"
             }
-          }
+          },
+          "sessionTag": "oyster_landing"
         },
         "policy": {
           "timeout": "0.01:00:00",
@@ -138,7 +143,8 @@
       {
         "type": "ForEach",
         "typeProperties": {
-          "isSequential": true,
+          "isSequential": false,
+          "batchCount": 2,
           "items": {
             "value": "@activity('Filter - active tables').output.value",
             "type": "Expression"
@@ -182,7 +188,8 @@
                               },
                               "type": "string"
                             }
-                          }
+                          },
+                          "sessionTag": "oyster_landing"
                         },
                         "policy": {
                           "timeout": "0.01:00:00",
@@ -212,7 +219,8 @@
                               },
                               "type": "string"
                             }
-                          }
+                          },
+                          "sessionTag": "oyster_landing"
                         },
                         "policy": {
                           "timeout": "0.01:00:00",
@@ -260,8 +268,7 @@
     ],
     "parameters": {
       "p_batch_folder": {
-        "type": "string",
-        "defaultValue": ""
+        "type": "string"
       },
       "p_root_folder": {
         "type": "string",

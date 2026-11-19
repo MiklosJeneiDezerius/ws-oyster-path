@@ -1,4 +1,4 @@
-CREATE TABLE [dev_gold].[gold_dim_date] (
+CREATE TABLE [dev_silver].[s_dim_date] (
     [date_key]         INT  NULL,
     [calendar_date]    DATE NULL,
     [calendar_year]    INT  NULL,

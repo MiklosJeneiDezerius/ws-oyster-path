@@ -1,4 +1,4 @@
-CREATE TABLE [dev_bronze].[bz_oys_transaction_ledger] (
+CREATE TABLE [dev_bronze].[b_oys_transaction_ledger] (
     [TransactionID]        VARCHAR (8000) NULL,
     [AccountID]            VARCHAR (8000) NULL,
     [Amount]               VARCHAR (8000) NULL,

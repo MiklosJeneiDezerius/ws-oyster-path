@@ -1,4 +1,4 @@
-CREATE TABLE [dev_gold].[gold_fct_transaction] (
+CREATE TABLE [dev_silver].[s_fct_transaction] (
     [transaction_id]         VARCHAR (8000)  NULL,
     [transaction_id_raw]     VARCHAR (8000)  NULL,
     [account_id]             VARCHAR (8000)  NULL,
