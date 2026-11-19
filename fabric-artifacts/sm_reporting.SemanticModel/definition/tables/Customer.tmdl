@@ -272,7 +272,7 @@ table Customer
 	partition Customer = entity
 		mode: directLake
 		source
-			entityName: gold_dim_customer
+			entityName: g_dim_customer
 			schemaName: dev_gold
 			expressionSource: DatabaseQuery
 

@@ -291,7 +291,7 @@ table 'Account Tier Snapshot'
 	partition 'Account Tier Snapshot' = entity
 		mode: directLake
 		source
-			entityName: gold_fct_account_tier_daily_snapshot
+			entityName: g_fct_account_tier_daily_snapshot
 			schemaName: dev_gold
 			expressionSource: DatabaseQuery
 

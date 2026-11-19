@@ -112,7 +112,7 @@ table Account
 	partition Account = entity
 		mode: directLake
 		source
-			entityName: gold_dim_account
+			entityName: g_dim_account
 			schemaName: dev_gold
 			expressionSource: DatabaseQuery
 

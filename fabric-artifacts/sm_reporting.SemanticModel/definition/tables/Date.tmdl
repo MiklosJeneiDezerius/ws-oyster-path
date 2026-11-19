@@ -93,7 +93,7 @@ table Date
 	partition Date = entity
 		mode: directLake
 		source
-			entityName: gold_dim_date
+			entityName: g_dim_date
 			schemaName: dev_gold
 			expressionSource: DatabaseQuery
 

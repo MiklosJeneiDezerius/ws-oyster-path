@@ -122,7 +122,7 @@ table 'Debit Card'
 	partition 'Debit Card' = entity
 		mode: directLake
 		source
-			entityName: gold_dim_debitcard
+			entityName: g_dim_debitcard
 			schemaName: dev_gold
 			expressionSource: DatabaseQuery
 
