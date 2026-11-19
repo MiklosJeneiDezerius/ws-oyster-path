@@ -4054,11 +4054,7 @@ the notebook parameter of the same name.
 
 ```text
 Set v_load_date
- -> Set v_batch_folder (= p_batch_folder)
- -> get_BatchFolders (Get Metadata, childItems of Files/<p_root_folder>)
- -> flt_BatchFolders (folders with a 14-character name)
- -> forEach_ResolveLatestBatch (sequential; If newer -> Set v_batch_folder)
- -> if_NoBatchFound (Fail: NO_BATCH_FOLDER)
+ -> nb_resolve_landing_batch (resolve once; return batch folder via notebookutils.notebook.exit)
  -> lkp_GetLoadConfig (Lookup, load_config.csv, firstRowOnly = false)
  -> Filter - active tables (is_active = '1' and is_active_delta = '1')
  -> forEach_FileLoader (sequential)
@@ -4070,20 +4066,38 @@ Set v_load_date
 
 Parameters: `p_batch_folder` (string, default empty = latest) and
 `p_root_folder` (default `landing/oyster`, relative to `Files`).
-Variables: `v_load_date` and `v_batch_folder`.
+Variable: `v_load_date`.
+
+In the repository pipeline `pl_jb_landing_delta`, `nb_resolve_landing_batch`
+replaces the native batch-resolution activities. It receives
+`p_root_path = Files/<p_root_folder>` and `p_batch_folder`, lists the
+14-digit batch directories using the same rules as the CSV loader, and returns
+the requested folder or the lexicographically latest folder. A missing batch
+raises `FileNotFoundError` before any loader runs (`NO_BATCH_FOLDER` in the
+message when no batch directories exist). The selected name is also checked
+as a `yyyyMMddHHmmss` timestamp. Both loader branches receive the same exit
+value, even if a newer batch arrives during the run. The CSV loader also
+receives the same `p_root_path`; its standalone latest-batch behavior is unchanged.
+The resolver uses a Spark notebook session, so it can add session startup time.
+
+Run the resolver and pipeline-wiring tests locally from the repository root
+(NotebookUtils file listings are mocked; no Fabric writes):
+
+```powershell
+python -B -m unittest discover -s .\fabric-artifacts\tests -p test_landing_batch.py -v
+```
 
 The key expressions:
 
 ```text
 v_load_date        @convertFromUtc(utcNow(), 'Central Europe Standard Time', 'yyyy-MM-dd HH:mm:ss')
-v_batch_folder     @coalesce(pipeline().parameters.p_batch_folder, '')
-batch folders      @and(equals(item().type, 'Folder'), equals(length(item().name), 14))
-resolve items      @if(empty(pipeline().parameters.p_batch_folder), activity('flt_BatchFolders').output.value, json('[]'))
-newer?             @greater(item().name, variables('v_batch_folder'))
+resolver input     @coalesce(pipeline().parameters.p_batch_folder, '')
+loader batch       @activity('nb_resolve_landing_batch').output.result.exitValue
+CSV/resolver root  @concat('Files/', pipeline().parameters.p_root_folder)
 active tables      @and(equals(item().is_active, '1'), equals(item().is_active_delta, '1'))
 ```
 
-The Lakehouse is referenced inline in the Get Metadata and Lookup activities
+The Lakehouse is referenced inline in the Lookup activity
 (`linkedService` of type `Lakehouse` with `workspaceId`, `artifactId` and
 `rootFolder: Files`), so no separate connection is needed inside the same
 workspace:
@@ -4113,7 +4127,8 @@ The csv branch, the notebook activity inside the ForEach:
     "notebookId": "730f3dc7-e69c-4c3f-af0b-cfb20ffc4433",
     "workspaceId": "5e32bf37-c2be-4676-94c7-97213238ed30",
     "parameters": {
-      "p_batch_folder": { "value": { "value": "@variables('v_batch_folder')", "type": "Expression" }, "type": "string" },
+      "p_root_path":    { "value": { "value": "@concat('Files/', pipeline().parameters.p_root_folder)", "type": "Expression" }, "type": "string" },
+      "p_batch_folder": { "value": { "value": "@activity('nb_resolve_landing_batch').output.result.exitValue", "type": "Expression" }, "type": "string" },
       "p_entities":     { "value": { "value": "@item().source_object_name", "type": "Expression" }, "type": "string" }
     }
   }
@@ -4138,7 +4153,7 @@ follow-up after the DW child succeeds.
 | Pipeline layout | One master with all activities, or one pipeline per layer with a master | **Per layer:** layers can be rerun alone; failures are localised |
 | Loader in the ForEach | Reuse `nb_csv_load_source_to_ld` with `p_entities`, or write a new per-table notebook | **Reuse:** one tested code base, same validation and `meta_*` columns |
 | Who picks "latest" | Each loader call on its own, or once in the pipeline | **Once in the pipeline:** every entity gets the same folder, even if a new folder appears during the run |
-| How "latest" is found | A small notebook, or Get Metadata + ForEach + If | **Native activities:** no Spark session, runs in seconds; `greater()` compares strings, correct for `yyyyMMddHHmmss` |
+| How "latest" is found | A small notebook, or Get Metadata + ForEach + If | **One resolver notebook:** replaces the native activity chain and returns one batch to both loader branches; requires a Spark session |
 | ForEach mode | Sequential or parallel (`batchCount`) | **Sequential:** predictable, one Spark session at a time; parallel is a later optimisation |
 | File type routing | CSV only, or Switch on `type` | **Switch:** `csv` and `json` loaders; any other value fails the run |
 | `v_load_date` | Batch folder name, or run time | **Run time in Budapest local time:** identifies the run in monitoring and later in notifications (O5) |
