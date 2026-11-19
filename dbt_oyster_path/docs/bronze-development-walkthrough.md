@@ -932,9 +932,17 @@ for file_prefix, (table_name, out) in prepared.items():
         display(spark.table(table_name).limit(10))
 ```
 
-**Cell 4 - verify the five landing tables:** use this after loading all entities.
-On a partial first load, some tables may not yet exist; after a partial reload,
-older tables can legitimately show different batch times until the load is completed.
+**Cell 4 - verify the tables written by this invocation:** the
+[CSV loader](../../fabric-artifacts/notebooks/nb_csv_load_source_to_ld.Notebook/notebook-content.py)
+reads back only the targets in `prepared`, which is built from `p_entities`.
+It reports row counts by source file and fails if a selected table is empty
+or contains an unexpected batch or load timestamp. A pipeline iteration does
+not check tables owned by other iterations, which may not exist yet or may
+still contain a previous batch.
+
+**Optional full-batch check (separate from the loader):** run this Spark SQL
+cell after a standalone all-entity load or after the ForEach has succeeded
+with all five canonical landing targets enabled:
 
 ```sql
 %%sql
@@ -954,10 +962,12 @@ SELECT 'transaction_ledger', meta_batch_timestamp, meta_load_timestamp, meta_sou
 FROM dbo.ld_oys_transaction_ledger GROUP BY meta_batch_timestamp, meta_load_timestamp, meta_source_file;
 ```
 
-**Acceptance:** after a successful full load, all five tables show the same batch
-and load times. Business values remain strings, and all required columns exist.
-These checks do not add cross-table atomicity, uniqueness enforcement, or a
-producer-completion protocol; the limits discussed above still apply.
+**Acceptance:** all five tables show the expected `meta_batch_timestamp`.
+`meta_load_timestamp` is shared only within one notebook invocation; separate
+ForEach iterations can have different load times. Business values remain
+strings, and all required columns exist. These checks do not add cross-table
+atomicity, uniqueness enforcement, or a producer-completion protocol; the
+limits discussed above still apply.
 
 ### Alternative: the source delivers JSON instead of CSV
 
@@ -4079,6 +4089,10 @@ as a `yyyyMMddHHmmss` timestamp. Both loader branches receive the same exit
 value, even if a newer batch arrives during the run. The CSV loader also
 receives the same `p_root_path`; its standalone latest-batch behavior is unchanged.
 The resolver uses a Spark notebook session, so it can add session startup time.
+
+Each CSV invocation verifies only the tables it wrote. Do not put an
+all-table check inside the ForEach; run the optional full-batch check above
+only after all required iterations have succeeded.
 
 Run the resolver and pipeline-wiring tests locally from the repository root
 (NotebookUtils file listings are mocked; no Fabric writes):

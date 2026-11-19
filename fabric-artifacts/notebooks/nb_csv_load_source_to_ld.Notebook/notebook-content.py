@@ -157,27 +157,31 @@ for file_prefix, (table_name, out) in prepared.items():
 
 # CELL ********************
 
-# MAGIC %%sql
-# MAGIC -- Expect one row per table, all with the SAME meta_batch_timestamp and meta_load_timestamp
-# MAGIC SELECT 'customer' AS tbl, meta_batch_timestamp, meta_load_timestamp, meta_source_file, COUNT(*) AS row_count
-# MAGIC FROM dbo.ld_oys_customer GROUP BY meta_batch_timestamp, meta_load_timestamp, meta_source_file
-# MAGIC UNION ALL
-# MAGIC SELECT 'customer_address', meta_batch_timestamp, meta_load_timestamp, meta_source_file, COUNT(*)
-# MAGIC FROM dbo.ld_oys_customeraddress GROUP BY meta_batch_timestamp, meta_load_timestamp, meta_source_file
-# MAGIC UNION ALL
-# MAGIC SELECT 'account', meta_batch_timestamp, meta_load_timestamp, meta_source_file, COUNT(*)
-# MAGIC FROM dbo.ld_oys_account GROUP BY meta_batch_timestamp, meta_load_timestamp, meta_source_file
-# MAGIC UNION ALL
-# MAGIC SELECT 'debitcard', meta_batch_timestamp, meta_load_timestamp, meta_source_file, COUNT(*)
-# MAGIC FROM dbo.ld_oys_debitcard GROUP BY meta_batch_timestamp, meta_load_timestamp, meta_source_file
-# MAGIC UNION ALL
-# MAGIC SELECT 'transaction_ledger', meta_batch_timestamp, meta_load_timestamp, meta_source_file, COUNT(*)
-# MAGIC FROM dbo.ld_oys_transaction_ledger GROUP BY meta_batch_timestamp, meta_load_timestamp, meta_source_file;
+# Other ForEach iterations can be in flight; only read targets written by this invocation.
+for table_name, _ in prepared.values():
+    summary = (
+        spark.table(table_name)
+        .groupBy("meta_batch_timestamp", "meta_load_timestamp", "meta_source_file")
+        .agg(F.count("*").alias("row_count"))
+        .collect()
+    )
+    if not summary:
+        raise ValueError(f"{table_name}: no rows after loading batch {batch_folder}")
+    for row in summary:
+        if row.meta_batch_timestamp != batch_ts or row.meta_load_timestamp != load_ts:
+            raise ValueError(
+                f"{table_name}: expected batch {batch_ts} and load time {load_ts}; "
+                f"found batch {row.meta_batch_timestamp} and load time {row.meta_load_timestamp}"
+            )
+        print(
+            f"Verified {table_name}: batch={row.meta_batch_timestamp}, "
+            f"load={row.meta_load_timestamp}, file={row.meta_source_file}, rows={row.row_count}"
+        )
 
 
 # METADATA ********************
 
 # META {
-# META   "language": "sparksql",
+# META   "language": "python",
 # META   "language_group": "synapse_pyspark"
 # META }
