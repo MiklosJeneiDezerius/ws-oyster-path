@@ -23,8 +23,8 @@
 # META {
 # META   "language": "python",
 # META   "language_group": "synapse_pyspark",
-# META   "frozen": true,
-# META   "editable": false
+# META   "frozen": false,
+# META   "editable": true
 # META }
 
 # PARAMETERS CELL ********************
@@ -32,7 +32,7 @@
 # A pipeline felülírhatja ezt a paramétercellát.
 # 0 = változatlan alapadat; 1 = egy vezetéknév- és két címváltozás SCD2-próbához.
 # Egy külön kapcsolóval választható a próba az alapgenerálás átírása nélkül.
-p_simulate_changes = 0
+p_simulate_changes = 1
 
 # METADATA ********************
 

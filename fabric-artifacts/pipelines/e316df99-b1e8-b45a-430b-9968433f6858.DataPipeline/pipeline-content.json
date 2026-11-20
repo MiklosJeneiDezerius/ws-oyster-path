@@ -38,12 +38,12 @@
             "p_simulate_changes": 0
           },
           "waitOnCompletion": true,
-          "workspaceId": "00000000-0000-0000-0000-000000000000",
-          "pipelineId": "2b39e20c-492b-45cc-a7b9-c4d0968eb7df",
+          "workspaceId": "5e32bf37-c2be-4676-94c7-97213238ed30",
+          "pipelineId": "a335715f-dd78-4564-b93f-0cff36a9975d",
           "operationType": "InvokeFabricPipeline"
         },
         "externalReferences": {
-          "connection": "339168a1-80c8-4dfe-afc0-e1072653b1bf"
+          "connection": "99d25f00-7a8c-4e9b-99fc-15696270fc7e"
         },
         "policy": {
           "timeout": "0.12:00:00",
@@ -53,6 +53,8 @@
           "secureOutput": false
         },
         "name": "Generate Data",
+        "state": "Inactive",
+        "onInactiveMarkAs": "Succeeded",
         "dependsOn": []
       },
       {
