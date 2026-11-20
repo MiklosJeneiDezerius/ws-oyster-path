@@ -1971,7 +1971,7 @@ changes or new events are captured.
 
 This is a controlled **future verification exercise**, not a data change already
 performed. The generator supports it through its `p_simulate_changes` parameter
-cell (default `0` = baseline):
+cell (notebook default `1` = changes; use `0` for the baseline):
 
 1. Run the generator with `p_simulate_changes = 1`. It creates a new complete
    delivery folder with a strictly later batch timestamp and, compared with the
@@ -1979,9 +1979,16 @@ cell (default `0` = baseline):
    - customer `1001` (Eszter): `LastName` `Kovacs` -> `Nagy`;
    - the Permanent address of customers `1101` (`AddressID` 3193) and `1102`
      (`AddressID` 3194): new postal code, city, street, and house number.
-   Every other entity, key, and transaction is identical to the baseline.
+   - three new transactions for customer `1001` (account `2001`) and four
+     for customer `1002` (account `2002`), with deterministic new IDs.
+   All baseline transactions and the other entity data remain unchanged.
+   The transaction count and tier spending limits describe the baseline only;
+   the extra transactions can increase the affected accounts beyond those limits.
 2. Load that delivery and pass landing tests/freshness.
 3. Snapshot and inspect the changed customer and addresses.
+4. Run the incremental Bronze model and verify its ledger count increases by
+   seven. Existing `TransactionID` values are skipped; repeating the same
+   changed batch adds no more rows. Both CSV and JSON contain the extra events.
 
 Inspect the deliberately changed customer in the Warehouse:
 
@@ -2016,6 +2023,8 @@ one, the address snapshot by exactly two, and other snapshot counts stay
 unchanged. Run snapshots again without changing landing; no further versions
 should appear. Running the generator again with `p_simulate_changes = 0`
 reverts these values, which produces another version for the same three keys.
+The Bronze ledger is append-only, so reverting to the baseline does not remove
+the seven previously loaded transactions.
 
 Do not mutate an already-snapshotted delivery and reuse its timestamp.
 Because the generator is deterministic, rerunning it alone is not proof of

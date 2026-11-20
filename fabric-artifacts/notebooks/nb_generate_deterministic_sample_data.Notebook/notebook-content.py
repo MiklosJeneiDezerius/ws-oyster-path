@@ -30,9 +30,9 @@
 # PARAMETERS CELL ********************
 
 # A pipeline felülírhatja ezt a paramétercellát.
-# 0 = változatlan alapadat; 1 = egy vezetéknév- és két címváltozás SCD2-próbához.
+# 0 = változatlan alapadat; 1 = név- és címváltozások, valamint új tranzakciók.
 # Egy külön kapcsolóval választható a próba az alapgenerálás átírása nélkül.
-p_simulate_changes = 1
+p_simulate_changes = 0
 
 # METADATA ********************
 
@@ -145,8 +145,7 @@ assert len({customer["CustomerID"] for customer in customers}) == CUSTOMER_COUNT
 # névkészletből választott női ügyfél egyetlen vezetéknév-változása célzott
 # snapshot-próba; a változás kikapcsolva az alapadat érintetlen marad.
 
-# Change scenario: applied after generation without drawing random numbers, so every other value
-# (accounts, cards, transactions) stays identical to the baseline.
+# Change scenario: no random numbers are drawn; baseline records remain reproducible.
 
 FEMALE_FIRST_NAMES = {"Anna", "Eszter", "Juli", "Nora"}
 renamed_customer_id = None
@@ -544,6 +543,29 @@ assert all(
     <= tier_amount_ranges_cents[current_tier_by_account[account_id]][1]
     for account_id, total_cents in total_cents_by_account.items()
 )
+
+# Az alaptranzakciók kulcsai és tartalma változatlan marad. A két kiválasztott
+# ügyfél új tételei stabil kulcsot kapnak, így az ismétlés nem újabb esemény.
+# A fenti darabszám- és tierösszeg-korlátok csak az alapadatra vonatkoznak.
+if int(p_simulate_changes):
+    extra_amounts_cents_by_customer = {
+        CUSTOMER_ID_START: (100, 200, 300),
+        CUSTOMER_ID_START + 1: (400, 500, 600, 700),
+    }
+    accounts_by_customer = {account["CustomerID"]: account for account in accounts}
+    for customer_id, amounts_cents in extra_amounts_cents_by_customer.items():
+        account_id = accounts_by_customer[customer_id]["AccountID"]
+        for index, amount_cents in enumerate(amounts_cents):
+            transactions.append({
+                "TransactionID": transaction_id,
+                "AccountID": account_id,
+                "Amount": f"{amount_cents / 100:.2f}",
+                "Timestamp": datetime.combine(
+                    anchor_day, time(12, 0, index)
+                ).strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            transaction_id += 1
+        print(f"Új tranzakciók: CustomerID={customer_id}, AccountID={account_id}, darab={len(amounts_cents)}")
 
 transactions_df = spark.createDataFrame(transactions)
 
