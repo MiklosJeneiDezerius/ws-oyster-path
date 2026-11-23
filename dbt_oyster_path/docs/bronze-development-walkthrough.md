@@ -1,4 +1,4 @@
-# Building the Oyster Bronze layer, one small change at a time
+# Step-by-step tutorial: build the Oyster data platform iteratively
 
 This guide establishes the data model and Fabric prerequisites, follows Day 3
 extraction, then reconstructs our development from dbt setup to the current
@@ -10,14 +10,21 @@ one iteration, not five.
 **Scope:** raw-file generation and extraction orchestration, Fabric Lakehouse
 landing tables, four Warehouse SCD2 snapshots, and
 one append-only incremental transaction ledger, and the iterative Silver
-extension. Silver currently has shared configuration and typed staging views;
+extension. BIS has shared configuration and typed staging tables;
 its customer, account, and debit-card SCD2 dimensions are implemented.
 Date/time dimensions, explicit customer/account Unknown members, and the
 transaction star fact with validation tests are also implemented. The Gold
 consumer models and account-tier daily snapshot are implemented and built in
 development.
 
-**Status:** the development stack is built and tested end to end. Landing
+**Pending deployment:** BIS was changed from views to tables in project
+configuration to align with the solution design. Historical Fabric build and
+test results below were obtained before this change and do not validate the
+conversion. Do not publish until the view-to-table migration and a full ordered
+BIS/Silver build with tests have been approved and verified in Fabric.
+
+**Historical status before the pending BIS change:** the development stack
+was built and tested end to end. Landing
 holds the complete `2026-11-18 09:33:59` batch, loaded by the master pipeline
 in Iteration 63 (102 customers, 194 addresses, 102 accounts, 102 debit cards,
 4,840 transactions). The Warehouse layers were built from the
@@ -33,6 +40,41 @@ and tested; retry/notification handling, scheduling, and semantic-model refresh
 remain follow-up work. Production builds have not been run.
 
 ## How to use this guide
+
+Each iteration is one development step. Read its **Goal**, **Reason and
+need**, and **When and why used** before changing anything. Then apply the
+change, run its acceptance check, and stop if the result differs from the
+expectation. Keep a working version before introducing the next responsibility.
+
+Follow the document from top to bottom, not by sorting the historical
+iteration numbers. Those labels are retained so existing references and run
+evidence remain traceable. The development path is:
+
+| Stage | Develop and check | Pipeline milestone |
+|---|---|---|
+| Model and provision | Agree entities, keys, environments, and layer boundaries | No orchestration yet |
+| Generate raw files | Save the generator, attach its Lakehouse, write and inspect one delivery | Create the raw-generation pipeline only after the manual run passes (E8-E10) |
+| Load Landing | Read one entity, select one batch, generalize, add validation and metadata | Create and test the Landing child pipeline after the complete loader passes (L1-L2) |
+| Establish dbt | Environment, project, connection, schema naming | Keep dbt commands manual while their behavior is being developed |
+| Describe sources | Register tables only, then fields/descriptions, then types, then tests | The Landing child supplies these physical tables; source YAML does not create them |
+| Preserve Bronze history | One snapshot, shared history settings, remaining snapshots, append-only ledger, tests | Prove baseline and repeat runs before scheduling writes |
+| Derive Silver and Gold | Typed staging, validation, temporal dimensions, facts, consumer projections | Continue using tested manual acceptance commands |
+| Operationalize | Reconcile the build, configure serial execution, wrap dbt in a notebook | Add the DW child and master only after their dependencies pass (O1-O4) |
+| Consume and release | Validate semantic measures, report, PR checks, stage bindings, approvals | Semantic refresh and production automation remain explicitly gated follow-ups |
+
+The source-registration sequence is intentionally incremental: create the
+Landing source YAML with table names only in Iteration 10; add fields and
+descriptions in 11; document types in 12; add key, batch, and freshness
+checks in 19-21. Use the same pattern for later models: define the grain,
+implement the smallest useful transformation, add its tests, then execute it.
+
+**Fresh build versus existing development environment:** the repository
+already contains the finished source files. Reconstruct intermediate versions
+only in an isolated learning branch/workspace. Iterations 52 and 54-57 include
+historical failures and repairs: inspect the stated condition first and skip
+a repair that does not apply. In particular, do not drop a correctly built
+ledger to reproduce an old schema problem. Recorded counts and timestamps
+are historical evidence, not expected freshness values for a new run.
 
 1. Make only the change described by the current iteration.
 2. Read its reason and decision point before proceeding.
@@ -171,6 +213,14 @@ listed below.
 
 ### Iteration P1. Turn the business story into a data model
 
+**Goal:** identify the five entities, their grains, and their stable keys.
+
+**Reason and need:** joins and history cannot be correct until identity and
+cardinality are explicit; table design follows this business contract.
+
+**When and why used:** do this before writing files or tables; reuse the
+contract when defining source tests, snapshots, and dimensional relationships.
+
 Start from the customer journey: a customer opens an account, receives a debit
 card, and makes transactions. Identify each entity, its stable key, and how
 records relate before choosing table columns or types.
@@ -204,6 +254,14 @@ downstream joins.
 
 ### Iteration P2. Confirm the Fabric environment
 
+**Goal:** identify the existing development workspace and required resources.
+
+**Reason and need:** correct code can still write to the wrong environment;
+capacity, permissions, Git bindings, and resource names must be checked first.
+
+**When and why used:** before importing notebooks or creating pipelines,
+confirm the destination that every later activity will reference.
+
 Before creating resources, verify the intended workspace, assigned Fabric
 capacity, and the operator's workspace permissions. The source exercise
 recommends separate Development, UAT, and Production environments connected
@@ -229,6 +287,15 @@ workspace and attached to `lh_oyster_path` as its default Lakehouse before it
 writes to OneLake.
 
 ### Iteration P3. Agree on the layer boundaries
+
+**Goal:** assign file retention, current Landing state, and observed history
+to distinct responsibilities.
+
+**Reason and need:** an overwrite and a history-preserving load solve different
+problems; confusing them can destroy replay or change-detection evidence.
+
+**When and why used:** before implementing ingestion, use these boundaries to
+decide which notebook or dbt resource owns each operation.
 
 The intended path is:
 
@@ -261,6 +328,14 @@ pipeline has been deployed or run.
 
 ### Iteration E1. Agree on the extraction boundary
 
+**Goal:** separate raw delivery, Landing Delta, and Bronze history.
+
+**Reason and need:** file generation is not a database connector or a history
+load; each stage needs its own input, output, and acceptance condition.
+
+**When and why used:** before creating extraction assets, use this contract
+to choose activities and prevent a pipeline from bypassing validation.
+
 Before creating anything, distinguish these three responsibilities:
 
 ```text
@@ -288,6 +363,14 @@ Do not create a second Lakehouse or generator just to match an older label.
 
 ### Iteration E2. Save the generator as a Fabric notebook
 
+**Goal:** make the existing generator a saved, correctly separated notebook.
+
+**Reason and need:** pipeline activities reference workspace items, not local
+scripts; exported metadata must not become executable cell content.
+
+**When and why used:** after confirming the workspace, save this item for
+manual validation and later invocation by the raw-generation pipeline.
+
 Open or import the existing
 [generator notebook](../../fabric-artifacts/notebooks/nb_generate_deterministic_sample_data.Notebook/notebook-content.py)
 in the Fabric workspace. For a fresh workspace, create a Notebook named
@@ -303,6 +386,14 @@ script or unsaved editor buffer.
 separated correctly.
 
 ### Iteration E3. Attach the destination Lakehouse
+
+**Goal:** bind the generator to the intended OneLake destination.
+
+**Reason and need:** `/lakehouse/default` requires a valid default Lakehouse;
+a local directory alone does not demonstrate persisted delivery files.
+
+**When and why used:** before the first file write, establish the attachment
+that interactive and pipeline notebook executions depend on.
 
 In the notebook's Lakehouse explorer, add `lh_oyster_path` and make it the
 **default Lakehouse**. Save the notebook.
@@ -330,6 +421,14 @@ the output through the Lakehouse **Files** browser.
 
 ### Iteration E4. Put extraction size in one parameter cell
 
+**Goal:** expose customer count without duplicating its assignment.
+
+**Reason and need:** a later assignment would overwrite pipeline input;
+a dedicated parameter cell separates invocation settings from generation logic.
+
+**When and why used:** before adding volume overrides in E9, use this optional
+refactor to test different supported sizes without editing the generator.
+
 The repository currently defines `CUSTOMER_COUNT = 102` in its configuration
 cell. For pipeline-controlled volume, a recommended small refactor is to put
 only that assignment in a dedicated cell:
@@ -353,6 +452,14 @@ change event identity/content assumptions downstream.
 requested value, not just the value visible in the parameter settings.
 
 ### Iteration E5. Create one timestamped raw delivery folder
+
+**Goal:** give all files from one execution a shared delivery location.
+
+**Reason and need:** overwriting a fixed folder loses replay evidence; resolving
+time once prevents different entities from appearing to belong to different runs.
+
+**When and why used:** before serialization, create the batch identity later
+used for loader selection, metadata, and troubleshooting.
 
 The current generator resolves its output paths once:
 
@@ -380,6 +487,14 @@ manifest should support retries and uniquely identify deliveries.
 `Files/landing/oyster/<yyyyMMddHHmmss>`.
 
 ### Iteration E6. Write one raw entity, then apply the same writer pattern
+
+**Goal:** prove Customer CSV serialization, then reuse it for all five entities.
+
+**Reason and need:** consistent headers, encoding, and filenames form the
+delivery contract; one shared mechanism avoids entity-specific writer drift.
+
+**When and why used:** after generating records and the batch folder, produce
+the files that the manual checks and Landing reader will consume.
 
 After constructing `customers`, write Customer as CSV:
 
@@ -424,6 +539,14 @@ scope/model decision if the expanded exercise needs them.
 
 ### Iteration E7. Run and validate manually before adding orchestration
 
+**Goal:** demonstrate one complete, inspectable raw delivery.
+
+**Reason and need:** notebook success alone does not prove that the right
+files, headers, and records reached OneLake.
+
+**When and why used:** before E8, establish the evidence needed to wrap the
+generator in a pipeline without hiding an unresolved file-writing problem.
+
 Run the generator once interactively. Then open the Lakehouse **Files** browser,
 refresh it, and inspect the new delivery folder.
 
@@ -453,6 +576,14 @@ behind a pipeline. File presence alone is not a production completion protocol.
 
 ### Iteration E8. Add the extraction pipeline with one activity
 
+**Goal:** create the smallest pipeline that invokes the validated generator.
+
+**Reason and need:** orchestration introduces item references and execution
+identity; testing one activity isolates those concerns from transformation logic.
+
+**When and why used:** only after E7 passes, use this independently runnable
+raw-generation child as the first building block of the later master.
+
 In Fabric:
 
 1. Create a **Data pipeline** named `pl_jb_landing_raw`.
@@ -470,6 +601,14 @@ No need to add schedules, branches, retries, or dbt execution simultaneously.
 the activity's display name.
 
 ### Iteration E9. Optionally expose extraction volume through the pipeline
+
+**Goal:** map a pipeline count parameter to the notebook's actual identifier.
+
+**Reason and need:** configurable invocation avoids code edits, but only works
+when the notebook parameter cell and exact names agree.
+
+**When and why used:** after E4 and E8, use the override for deliberate volume
+tests; leave it out if the exercise needs only the deterministic default.
 
 Only after completing E4, add a pipeline parameter and map it into the Notebook
 activity's **Base parameters**:
@@ -492,6 +631,14 @@ Never pass `num_customers` to code that only reads `CUSTOMER_COUNT`.
 
 ### Iteration E10. Save, run, monitor, and verify the raw delivery
 
+**Goal:** prove that the pipeline creates the same valid delivery as a manual run.
+
+**Reason and need:** saving an activity is not execution evidence; run history
+and file inspection connect orchestration success to its actual output.
+
+**When and why used:** before building the Landing reader, retain the successful
+run ID and folder so ingestion has a known-good input.
+
 1. Save `pl_jb_landing_raw`.
 2. Run it once.
 3. Follow the Notebook activity in the pipeline's output/monitoring view.
@@ -510,6 +657,14 @@ on a fresh execution, so retries are not automatically the same logical delivery
 does not create, execute, or verify a live Fabric pipeline.
 
 ### Iteration E11. Introduce the simplest Landing Delta load
+
+**Goal:** read one verified Customer CSV and write one Landing table.
+
+**Reason and need:** first prove the file-to-table mechanism before introducing
+discovery, loops, metadata, and validation.
+
+**When and why used:** after raw delivery acceptance, use this learning probe
+to distinguish Files from Tables; later iterations replace its minimal reader.
 
 Open the existing
 [loader notebook](../../fabric-artifacts/notebooks/nb_csv_load_source_to_ld.Notebook/notebook-content.py)
@@ -551,6 +706,14 @@ all five entities.
 
 ### Iteration E11a. Select one batch folder
 
+**Goal:** remove dependence on generator variables by selecting one delivery.
+
+**Reason and need:** separate notebook activities do not share Python state;
+reading every full extract would duplicate business keys.
+
+**When and why used:** once the single-file read works, use explicit selection
+for standalone loads and later pass a pinned batch from the Landing pipeline.
+
 Replace the manually supplied delivery path with explicit folder discovery
 inside the loader notebook:
 
@@ -588,6 +751,14 @@ A greatest folder name does not prove a producer has finished writing it.
 
 ### Iteration 9. Keep landing business values as strings
 
+**Goal:** preserve source representations consistently in every Landing entity.
+
+**Reason and need:** inference can strip leading zeros or change types across
+batches; raw ingestion should not silently redefine the business contract.
+
+**When and why used:** while generalizing the reader, retain text for audit
+and defer deliberate conversions and conversion tests to Silver staging.
+
 Apply the same reader setting to all five entities:
 
 ```python
@@ -611,6 +782,14 @@ running either notebook. A frozen `%%configure` cell and empty dependency
 metadata do not establish that the Lakehouse is attached.
 
 ### Iteration E12. Choose load and history semantics before expanding
+
+**Goal:** decide overwrite, retention, and history behavior explicitly.
+
+**Reason and need:** full-state extracts and event batches have different
+delete and replay semantics; the wrong choice can lose events or invent deletes.
+
+**When and why used:** before the all-entity loader, use these choices to
+justify Landing overwrite, four snapshots, and a separate incremental ledger.
 
 | Decision | Choice here | Choose differently when |
 |---|---|---|
@@ -643,12 +822,27 @@ an explicit delivery handoff rather than assuming “latest” identifies this r
 
 ### Improve the loader, one responsibility at a time
 
+> Historical design: iterations 13-22 below describe the earlier multi-entity
+> loader. The current notebook loads one source per invocation, accepts
+> `p_in_table_name`, derives the target as `dbo.ld_oys_<lowercase source name>`,
+> and does not validate business keys or required columns. Historical examples
+> may refer to the former `ld_oys_customeraddress` name; the current target is
+> `ld_oys_customeradress`. See the config-driven pipeline section for its current contract.
+
 These are shared changes for every entity. They replace the duplicated
 single-Customer example and frozen multi-table loop with one execution path.
 Their existing iteration numbers are retained even though this section now
 appears before dbt setup.
 
 ### Iteration 13. Centralize the entity configuration
+
+**Goal:** put each entity's destination, key, and required columns in one mapping.
+
+**Reason and need:** duplicated read/write loops drift; configuration lets one
+validated mechanism serve every entity without copying its logic.
+
+**When and why used:** after proving Customer ingestion, use the mapping to
+expand to five entities and support pipeline-selected subsets later.
 
 ```python
 ENTITIES = {
@@ -671,6 +865,14 @@ The generator writes both transaction CSV and JSON; this loader uses CSV
 (the JSON alternative is described at the end of Part 0).
 
 ### Iteration 14. Add pipeline parameters
+
+**Goal:** expose batch, entity selection, root path, and debugging as inputs.
+
+**Reason and need:** replay and diagnosis should not require logic edits;
+invalid explicit input must fail rather than fall back to a different delivery.
+
+**When and why used:** before pipeline integration, mark and verify the
+parameter cell so both manual tests and activity overrides use the same path.
 
 Put these defaults in a dedicated cell:
 
@@ -704,6 +906,14 @@ until cross-table consistency is restored.
 
 ### Iteration 15. Validate required headers and keep extra columns
 
+**Goal:** reject missing required fields while retaining unexpected fields.
+
+**Reason and need:** downstream models depend on known names; silently
+dropping new fields loses evidence of source-contract changes.
+
+**When and why used:** inside preparation, check headers before writes and
+use warnings to trigger review of later dbt source and staging changes.
+
 Inside the shared `prepare(file_prefix)` function:
 
 ```python
@@ -724,6 +934,14 @@ validation, especially for unexpected columns or multiple input files.
 
 ### Iteration 16. Reject empty business keys
 
+**Goal:** prevent NULL or blank entity identifiers from entering Landing.
+
+**Reason and need:** snapshots and event identity require usable keys;
+invalid identifiers must not become ambiguous history or deduplication inputs.
+
+**When and why used:** during preparation and before overwrite, protect this
+ingestion path; later dbt tests independently validate persisted keys.
+
 ```python
 from pyspark.sql import functions as F
 
@@ -738,6 +956,14 @@ if empty_keys:
 keys but does not normalize valid keys or reject duplicates.
 
 ### Iteration 17. Add batch time, shared load time, and source filename
+
+**Goal:** attach observation, execution, and file lineage to each loaded row.
+
+**Reason and need:** business timestamps do not identify a delivery, and load
+time alone cannot distinguish an old extract reloaded today.
+
+**When and why used:** during projection, create the metadata later consumed
+by source freshness, snapshot timing, reconciliation, and run investigation.
 
 Resolve these once per notebook execution:
 
@@ -780,6 +1006,14 @@ would need an explicit collision policy.
 
 ### Iteration 18. Validate every selected entity before writing any table
 
+**Goal:** separate preparation from the write loop for the selected entities.
+
+**Reason and need:** known input defects should fail before overwrites start;
+this reduces partial loads without claiming a cross-table transaction.
+
+**When and why used:** once shared checks exist, apply them before a standalone
+all-entity load; account for weaker per-entity protection in the later ForEach.
+
 ```python
 prepared = {e: prepare(e) for e in selected}
 
@@ -805,6 +1039,14 @@ multiple groups per table; the important shared value is the selected batch.
 
 ### Iteration 26. Reject empty entity deliveries before deletion detection
 
+**Goal:** stop header-only files from replacing a populated entity table.
+
+**Reason and need:** downstream full-state snapshots could interpret an empty
+broken delivery as every entity having disappeared.
+
+**When and why used:** add this guard before enabling snapshot deletes and
+before accepting the complete loader for pipeline execution.
+
 In the loader, immediately after reading `df`:
 
 ```python
@@ -821,6 +1063,14 @@ from a broken one. This guard cannot detect a non-empty but incomplete extract.
 
 ### Complete loader: assemble the cells before moving on to dbt
 
+**Goal:** assemble and manually accept the loader's single execution path.
+
+**Reason and need:** isolated improvements must work together; cell order,
+parameters, validation, writes, and read-back checks form one usable notebook.
+
+**When and why used:** after all loader iterations, verify all five entities
+before creating the Landing child pipeline in L1-L2 below.
+
 All loader changes are now together. Historical iteration labels are retained;
 follow their order here rather than their numeric values.
 The following cells assemble the current loader's behaviour without the Git
@@ -828,6 +1078,14 @@ export metadata. Keep the default Lakehouse attachment from E3. If using
 `%%configure`, it belongs before these cells, as shown in E3.
 
 **Cell 1 - parameters:** mark this cell as the Fabric parameter cell.
+
+**Goal:** expose invocation defaults in one recognized parameter cell.
+
+**Reason and need:** pipeline overrides must not be overwritten by later
+assignments or ignored because the cell has not been marked correctly.
+
+**When and why used:** assemble this cell first; manual runs use its defaults
+and the Landing activity later supplies the same exact input names.
 
 ```python
 p_root_path = "Files/landing/oyster"
@@ -837,6 +1095,14 @@ p_debug = 0
 ```
 
 **Cell 2 - configuration and batch selection:**
+
+**Goal:** validate entity selection and resolve one shared batch and load time.
+
+**Reason and need:** every prepared entity must use the same delivery identity;
+invalid inputs should fail before any table is touched.
+
+**When and why used:** after parameter initialization, run this cell before
+preparing DataFrames so the write loop has explicit, consistent inputs.
 
 ```python
 import re
@@ -879,6 +1145,14 @@ print(f"Batch {batch_folder} (of {len(batch_folders)}) | entities: {selected} | 
 ```
 
 **Cell 3 - prepare every entity, then write:**
+
+**Goal:** combine the reader, guards, metadata projection, and overwrite loop.
+
+**Reason and need:** the earlier isolated changes must protect the actual
+execution path; preparation should expose known input defects before writes.
+
+**When and why used:** after configuration succeeds, prepare the selected
+entities, then write them; a failed write still requires partial-load recovery.
 
 ```python
 def prepare(file_prefix):
@@ -940,6 +1214,14 @@ or contains an unexpected batch or load timestamp. A pipeline iteration does
 not check tables owned by other iterations, which may not exist yet or may
 still contain a previous batch.
 
+**Goal:** confirm the persisted output of this invocation, not unrelated tables.
+
+**Reason and need:** a successful write submission is insufficient evidence
+of row counts and correct metadata, especially for per-entity pipeline calls.
+
+**When and why used:** immediately after the write loop, read back its selected
+targets; reserve cross-table acceptance for completion of the whole Landing child.
+
 **Optional full-batch check (separate from the loader):** run this Spark SQL
 cell after a standalone all-entity load or after the ForEach has succeeded
 with all five canonical landing targets enabled:
@@ -975,6 +1257,9 @@ limits discussed above still apply.
 nested JSON instead of a flat CSV file. The example is the transaction ledger,
 which the generator also writes as `Transaction_Ledger_<run timestamp>.json`.
 The notebook is `nb_json_load_source_to_ld`, placed next to the CSV loader.
+It accepts the same root, batch and source-name parameters as the CSV loader
+and derives the same target name. Its nested schema currently supports only
+`Transaction_Ledger`; other JSON sources fail before loading.
 
 **Why it matters:** many sources (APIs, event exports) deliver documents, not
 rows. Landing must still expose one row per business record with the same
@@ -993,6 +1278,14 @@ grouped into arrays of 20, so the payload is an array of arrays:
 ```
 
 #### Step 1. Read with an explicit schema
+
+**Goal:** read nested JSON into a predictable, string-valued document structure.
+
+**Reason and need:** inference and permissive parsing can change the Landing
+contract or conceal malformed input.
+
+**When and why used:** only for the optional JSON route, establish the reader
+before validating nesting or converting documents to transaction rows.
 
 ```python
 transaction_schema = StructType([StructField(c, StringType()) for c in REQUIRED_COLUMNS])
@@ -1020,6 +1313,14 @@ into a failed run; the default `PERMISSIVE` mode would load it as a null row.
 
 #### Step 2. Validate the envelope before exploding
 
+**Goal:** reject missing parents and NULL or empty transaction batches.
+
+**Reason and need:** flattening and exploding can remove damaged documents
+without an error; row-level checks cannot recover those discarded parents.
+
+**When and why used:** after JSON reading but before flattening, ensure each
+document can legitimately contribute transaction rows.
+
 ```python
 bad_envelopes = documents.filter(
     F.col("Data.AccountID").isNull()
@@ -1040,6 +1341,14 @@ Without this check, a damaged document would make an entire account disappear
 from Landing without any error.
 
 #### Step 3. `flatten` + `explode`: from documents to rows
+
+**Goal:** produce one row per nested transaction with parent and file lineage.
+
+**Reason and need:** dbt expects a relational contract, not arrays; carrying
+the envelope account enables parent/child consistency checks after expansion.
+
+**When and why used:** after envelope validation, normalize JSON to the shape
+that the CSV path already exposes before applying row-level checks.
 
 ```python
 transactions = (
@@ -1077,6 +1386,15 @@ checked against the transaction.
 
 #### Step 4. Validate rows and project the CSV contract
 
+**Goal:** validate transaction identity and parent consistency, then project
+the same columns and metadata as CSV.
+
+**Reason and need:** nesting introduces misplaced-child errors; a compatible
+output lets downstream dbt remain independent of serialization format.
+
+**When and why used:** before the JSON table overwrite, run these checks and
+then verify the selected canonical destination after loading.
+
 ```python
 missing = transactions.filter(
     reduce(or_, [F.col(c).isNull() | (F.trim(F.col(c)) == "") for c in REQUIRED_COLUMNS])
@@ -1102,7 +1420,7 @@ file cannot have, a transaction placed under the wrong parent document.
 
 | Decision | Options | Choice |
 |---|---|---|
-| Target table | a) separate table `dbo.ld_oys_transaction_ledger_json`; b) replace `dbo.ld_oys_transaction_ledger` | **a)** by default, so both paths can be compared; set `p_target_table = "dbo.ld_oys_transaction_ledger"` once the source switches to JSON. dbt does not change. |
+| Target table | Derive from the source name as in the CSV loader | `Transaction_Ledger` -> `dbo.ld_oys_transaction_ledger`; either format overwrites the same table. Enable only one route at a time. |
 | Parsing | Python on the driver (`json.loads`) or Spark reader | **Spark with an explicit schema**: it scales, and the schema is a contract |
 | Duplicated `TransactionID` | Keep the latest, or fail | **Fail**: Landing does not repair the source silently. Deduplication is a deliberate downstream decision. |
 | Malformed line | `PERMISSIVE`, `DROPMALFORMED`, `FAILFAST` | **`FAILFAST`** |
@@ -1117,13 +1435,13 @@ file cannot have, a transaction placed under the wrong parent document.
    drop data without raising an error.
 4. Validate parent/child consistency (the envelope `AccountID`).
 5. Write only after all checks have passed.
-6. Reconcile a new ingestion path against the old one before switching. The
-   last notebook cell compares the JSON table with the CSV table using
-   `exceptAll` in both directions.
+6. If comparing formats, use a separate controlled comparison before switching;
+   the loader no longer writes a separate comparison table.
 7. Refresh the SQL analytics endpoint metadata before reading a new table
    through it (see O2).
 
-**Verification run (batch `2026-11-18 07:20:24`):**
+**Historical verification run (batch `2026-11-18 07:20:24`), before both
+formats were changed to write the same target:**
 
 | Table | Rows | Distinct TransactionID | SUM(Amount) | Rows only in this table |
 |---|---|---|---|---|
@@ -1133,11 +1451,230 @@ file cannot have, a transaction placed under the wrong parent document.
 The column names and types are identical as well, so the JSON path can replace
 the CSV path without changing dbt.
 
-Continue with dbt setup below. No later section introduces another loader edit.
+### Iteration L1. Create the Landing child pipeline after loader acceptance
+
+**Goal:** invoke the accepted loader from an independently runnable pipeline.
+
+**Reason and need:** Landing should be rerunnable without generating new raw
+files; a layer-specific child makes failed ingestion recoverable on the same batch.
+
+**When and why used:** after the complete manual loader check, create this
+child before dbt development so it can supply validated physical source tables.
+
+1. Save the validated loader and verify its parameter cell and default Lakehouse.
+2. In Fabric, create or open the intended Landing Data pipeline. The repository
+  name is `pl_jb_landing_delta`; later workspace evidence calls the layer
+  pipeline `pl_Landing_Delta_Core`. Verify identity rather than creating both.
+3. Start with one Notebook activity referencing `nb_csv_load_source_to_ld`.
+  Add string pipeline parameters for `p_root_path` and `p_batch_folder`.
+  Map them to the matching notebook base parameters; pass `p_in_table_name`
+  for one CSV entity. Test first with a known complete batch folder.
+4. Set an explicit activity timeout and keep retries at zero until recovery
+  behavior is designed. Save, run, and inspect notebook diagnostics.
+5. Confirm all five tables have the requested batch timestamp, required
+  columns, and expected counts. Record the run ID and selected folder.
+
+**Acceptance:** the child loads the explicit batch without running the
+generator. An invalid explicit batch fails without silently choosing latest.
+Stop on failure; do not start dbt against partially loaded tables.
+
+**Initial single-activity parameter mappings:** in the Notebook activity's
+**Settings > Base parameters**, select **Add dynamic content** for each
+expression below. These are the L1 teaching pipeline inputs, before L2
+introduces the final `p_root_folder` and resolver-based design.
+
+| Notebook base parameter | Type | Value | Purpose |
+|---|---|---|---|
+| `p_root_path` | String | `@pipeline().parameters.p_root_path` | Pass the full root, for example `Files/landing/oyster` |
+| `p_batch_folder` | String | `@pipeline().parameters.p_batch_folder` | Pass the explicitly selected delivery folder |
+| `p_in_table_name` | String | `Customer` | CSV file prefix for this invocation |
+
+### After L1. Export the Landing Delta pipeline to an empty Azure Repos branch
+
+After saving and validating the Landing Delta load pipeline, use this one-time
+workflow to bring the Fabric definitions into VS Code. The new branch has one
+empty root commit: it starts with no files and inherits no history from `main`.
+For normal PR work, use a [feature branch based on `main`](#1-create-a-short-lived-feature-branch-and-make-a-focused-change) instead.
+
+#### 1. Create and push the empty branch
+
+From `C:\munka\VSCode\Projects` in PowerShell, use an existing empty
+`oyster_ukrmol` folder that is not already a Git repository. The branch name
+must be unused in Azure Repos.
+
+```powershell
+cd oyster_ukrmol
+git init
+git switch --orphan miklos_jenei
+git remote add origin https://pulze-azure-devops@dev.azure.com/pulze-azure-devops/Oyster/_git/Oyster
+git commit --allow-empty -m "Initial commit"
+git push -u origin miklos_jenei
+```
+
+#### 2. Connect Fabric and push the workspace definitions
+
+Use the development workspace that contains the saved Landing Delta pipeline.
+You need workspace Admin access to connect, a Fabric capacity assigned to the
+workspace, and write access to the Azure Repos branch. Check that Fabric Git
+integration is enabled. If the workspace is already connected to `main` or
+another shared branch, do not switch or disconnect it for this walkthrough.
+
+1. In Fabric, open **Workspace settings > Git integration**, select **Azure
+   DevOps**, and sign in. Select organization `pulze-azure-devops`, project
+   `Oyster`, repository `Oyster`, and the existing branch `miklos_jenei`.
+   Leave **Folder** blank to use the branch root.
+2. Select **Connect and sync**. Fabric uses the populated workspace to seed
+   the empty branch. If prompted for a direction, choose **Commit to Git**
+   (workspace to branch), not **Update from Git** (branch to workspace).
+   Review the workspace items before syncing: the initial sync can export
+   other supported items as well as the pipeline. Git stores definitions,
+   not the Landing Delta table data.
+3. If the initial sync already exported the pipeline, no second commit is
+   needed. For any remaining intended changes, open **Source control >
+   Changes**, select the pipeline and any required supported dependencies
+   (such as its loader notebook), enter a message such as `Export Landing
+   Delta load pipeline`, and select **Commit**. Fabric writes that commit
+   directly to Azure Repos; there is no separate `git push` from VS Code.
+4. In Azure DevOps **Repos > Files**, select `miklos_jenei` and verify the
+   `.DataPipeline` directory contains `pipeline-content.json`. Confirm the
+   pipeline is shown as **Synced** in Fabric.
+
+See [Get started with Fabric Git integration](https://learn.microsoft.com/en-us/fabric/cicd/git-integration/git-get-started).
+
+#### 3. Pull the exported definitions into VS Code
+
+If you still have the directory from step 1, use the VS Code PowerShell
+terminal there. The initial `git push -u` already set the upstream.
+
+```powershell
+Set-Location 'C:\munka\VSCode\Projects\oyster_ukrmol'
+git switch miklos_jenei
+git pull --ff-only
+git log -1 --oneline
+code .
+```
+
+If you do not have a local checkout, clone the branch into an unused directory
+instead:
+
+```powershell
+Set-Location 'C:\munka\VSCode\Projects'
+git clone --branch miklos_jenei --single-branch https://pulze-azure-devops@dev.azure.com/pulze-azure-devops/Oyster/_git/Oyster oyster_ukrmol
+Set-Location '.\oyster_ukrmol'
+git log -1 --oneline
+code .
+```
+
+**Acceptance:** VS Code shows `miklos_jenei`, the latest local commit matches
+the branch tip in Azure Repos, and the exported Landing Delta pipeline
+definition is present locally.
+
+### Iteration L2. Pin the batch, then make Landing config-driven
+
+**Goal:** evolve the working child into the resolver, Lookup, Filter, and
+sequential ForEach design, introducing one activity at a time.
+
+**Reason and need:** per-entity selection must share one batch, and unsupported
+source formats must fail; metadata should control routing, not copied pipelines.
+
+**When and why used:** after L1 passes, use the detailed definitions in
+[O2](#iteration-62-o2-decide-how-the-loader-selects-the-batch) and
+[O3](#iteration-63-o3-one-pipeline-per-layer-a-config-driven-landing-load-and-a-master)
+as the implementation reference now. Leave the master and DW child for later.
+
+1. Verify the exported loader's parameter marker as shown in O2. Add the
+  saved `nb_resolve_landing_batch` notebook before the loader, on success.
+  Pass its exit value to the loader and prove explicit, latest, and missing
+  batch cases. Resolve once; do not discover latest inside each iteration.
+2. Create `Files/config/load_config.csv` with the five rows shown in O3.
+  Add the Lookup with `firstRowOnly = false`; run and inspect its output.
+3. Add the active-row Filter and check string comparisons against `'1'`.
+  Confirm the expected five rows survive before introducing a loop.
+4. Put the loader inside a ForEach, passing the current row's
+  `source_object_name` as `p_in_table_name` and the resolver's shared batch.
+  Retest counts and metadata after the entire loop completes.
+5. Add the file-type Switch only after CSV works. Enable JSON only for the
+  supported `Transaction_Ledger` source. Both formats overwrite its canonical
+  table, so keep only one enabled route per entity. Use a Fail activity for
+  unsupported types.
+6. Run the local resolver/wiring check documented in O3, then run the child
+  in Fabric. Use the separate full-batch check only after every required
+  entity succeeds, not inside individual loader invocations.
+
+**Acceptance:** every enabled canonical source uses the same selected batch;
+the child fails on an unknown batch or unsupported type. A partial failure
+blocks dbt; rerun Landing with the same explicit folder to restore consistency.
+
+#### Landing pipeline expression reference
+
+**Goal:** configure each activity with the exact input or expression it needs.
+
+**Reason and need:** activity names, output properties, and parameter names
+are executable references. Describing a Filter or ForEach without its Items
+expression is not enough to reproduce the pipeline.
+
+**When and why used:** add each row when developing the corresponding L2
+activity, then inspect its resolved input/output during a test run. These
+expressions come from the checked-in
+[Landing pipeline definition](../../fabric-artifacts/pipelines/pl_jb_landing_delta.DataPipeline/pipeline-content.json).
+
+In the Fabric expression editor, paste the full expression including the
+leading `@`. In exported JSON, it is the `value` of an object whose `type`
+is `Expression`. Do not paste that JSON wrapper into the editor. Use plain
+expressions, not `@{...}` string interpolation, for arrays and typed values.
+
+| Activity | UI field / destination | Exact expression | Why it is used |
+|---|---|---|---|
+| `Set v_load_date` | Value for variable `v_load_date` | `@convertFromUtc(utcNow(), 'Central Europe Standard Time', 'yyyy-MM-dd HH:mm:ss')` | Record the run time in Budapest local time, not the batch identity |
+| `nb_resolve_landing_batch` | Base parameter `p_root_path` | `@concat('Files/', pipeline().parameters.p_root_folder)` | Convert the pipeline's Files-relative root into the notebook path |
+| `nb_resolve_landing_batch` | Base parameter `p_batch_folder` | `@coalesce(pipeline().parameters.p_batch_folder, '')` | Pass an explicit batch or an empty value for latest-folder selection |
+| `Filter - active tables` | Items | `@activity('lkp_GetLoadConfig').output.value` | Supply the array returned by Lookup with `firstRowOnly = false` |
+| `Filter - active tables` | Condition | `@and(equals(item().is_active, '1'), equals(item().is_active_delta, '1'))` | Keep only config rows enabled for both source and Delta loading |
+| `forEach_FileLoader` | Items | `@activity('Filter - active tables').output.value` | Iterate only the filtered config rows |
+| `sw_FileType` | Expression / On | `@toLower(trim(item().type))` | Normalize the current row's format before choosing a case |
+| `nb_csv_load_source_to_ld` | Base parameter `p_root_path` | `@concat('Files/', pipeline().parameters.p_root_folder)` | Read from the same root as the resolver |
+| `nb_csv_load_source_to_ld` | Base parameter `p_batch_folder` | `@activity('nb_resolve_landing_batch').output.result.exitValue` | Pin every CSV invocation to the single resolved batch |
+| `nb_csv_load_source_to_ld` | Base parameter `p_in_table_name` | `@item().source_object_name` | CSV file prefix in the current ForEach config row |
+| `nb_json_load_source_to_ld` | Base parameter `p_root_path` | `@concat('Files/', pipeline().parameters.p_root_folder)` | Read from the same root as the resolver |
+| `nb_json_load_source_to_ld` | Base parameter `p_batch_folder` | `@activity('nb_resolve_landing_batch').output.result.exitValue` | Give the JSON branch the same pinned batch |
+| `nb_json_load_source_to_ld` | Base parameter `p_in_table_name` | `@item().source_object_name` | JSON file prefix; currently only `Transaction_Ledger` is supported |
+| `Fail - unknown type` | Fail message | `@concat('Unsupported type ''', item().type, ''' for ', item().source_object_name)` | Include the unsupported raw type and entity in the failure message |
+
+The Switch case values `csv` and `json` are **literal strings**, not
+expressions. Its default branch uses literal error code
+`UNSUPPORTED_SOURCE_TYPE`. In the Fail expression, doubled single quotes
+produce a quote character: a config row with type `xml` and source `Customer`
+resolves to `Unsupported type 'xml' for Customer`.
+
+`item()` means the current Filter row in the Condition and the current
+ForEach row inside the Switch/notebook/Fail activities. Use the activity
+names exactly as shown; changing a display name requires updating every
+expression that refers to it. With all five config rows enabled, Lookup,
+Filter, and ForEach should each contain five rows; both notebook branches
+must receive the same resolver exit value.
+
+**Repository versus first tutorial version:** L2 teaches a sequential loop
+first. The current export has `isSequential: false`, `batchCount: 2`, and
+shared notebook session tag `oyster_landing`; those are later execution
+settings, not expressions. Both branches receive the same root, batch and
+source-name parameters, and derive the same target for a given source. Do not
+enable CSV and JSON rows for the same source concurrently.
+
+Continue with dbt setup below. O2-O3 retain the complete pipeline snippets and
+historical run evidence; later master creation reuses these tested children.
+No later section introduces another loader edit.
 
 ## Part I. Make dbt work before modelling anything
 
 ### Iteration 1. Create an isolated Python environment
+
+**Goal:** install the tested dbt runtime without changing global packages.
+
+**Reason and need:** adapter/version mismatches make results hard to reproduce;
+an explicit environment keeps project commands tied to known dependencies.
+
+**When and why used:** before project initialization or parsing, establish
+the executable used for every local dbt check and mirrored by the runner.
 
 **Change:** create a virtual environment at the repository root.
 
@@ -1174,6 +1711,14 @@ require no external package.
 
 ### Iteration 2. Initialize the dbt project
 
+**Goal:** establish dbt's standard project structure and profile name.
+
+**Reason and need:** resource discovery depends on project configuration;
+scaffolding gives a minimal parseable base before layer-specific changes.
+
+**When and why used:** for a fresh learning repository only, initialize once;
+in this checkout inspect the existing project instead of overwriting it.
+
 For a fresh repository, from its root:
 
 ```powershell
@@ -1189,6 +1734,14 @@ resource-path settings, and example model configuration.
 `name: dbt_oyster_path` and `profile: dbt_oyster_path`.
 
 ### Iteration 3. Exclude local and generated files
+
+**Goal:** keep environments, logs, generated output, and temporary files out of Git.
+
+**Reason and need:** review should contain intentional source changes, not
+machine-specific artifacts or accidentally captured credentials.
+
+**When and why used:** before the first project commit, establish ignore rules
+that will also keep later PR and Fabric synchronization diffs reviewable.
 
 Add these entries to the repository ignore rules without replacing existing ones:
 
@@ -1208,6 +1761,14 @@ by the project's ignore rules. Do not ignore source models or snapshots.
 code. Never put credentials or access tokens in Git.
 
 ### Iteration 4. Create the Fabric Warehouse and a dev profile
+
+**Goal:** connect dbt to the intended writable development Warehouse.
+
+**Reason and need:** the Lakehouse SQL endpoint supplies reads but is not the
+dbt write target; configuration and authentication need independent verification.
+
+**When and why used:** before source sampling or history builds, run `debug`
+to prove the profile resolves and the approved network/identity can connect.
 
 In Fabric, create a Warehouse called `dw_oyster_path` in the intended workspace.
 Copy its SQL connection endpoint from Fabric; do not construct the host yourself.
@@ -1253,6 +1814,14 @@ landing permissions or prove that models can build.
 
 ### Iteration 5. Add a prod output
 
+**Goal:** describe a separate production target without executing it.
+
+**Reason and need:** target names alone do not isolate environments; safe
+defaults must not silently send production commands to development.
+
+**When and why used:** while organizing profiles, prepare future deployment
+bindings; use production only after endpoint, permissions, and isolation review.
+
 Add `prod` alongside `dev`, not inside it:
 
 ```yaml
@@ -1285,6 +1854,14 @@ $env:DBT_PROD_DATABASE = "<production Warehouse database>"
 
 ### Iteration 6. Give snapshots a shared Bronze schema
 
+**Goal:** define one schema default for all project snapshots.
+
+**Reason and need:** repeated per-entity settings drift; resource defaults
+belong in the project rather than mixed into table declarations.
+
+**When and why used:** before declaring snapshots, establish the destination
+that the schema-naming macro will resolve for each environment.
+
 Append to [dbt_project.yml](../dbt_project.yml), retaining all existing settings:
 
 ```yaml
@@ -1301,6 +1878,14 @@ Table declarations and column tests belong in resource YAML files, not as table
 definitions inside `dbt_project.yml`.
 
 ### Iteration 7. Make custom schemas environment-aware
+
+**Goal:** resolve development and production layer names consistently.
+
+**Reason and need:** dbt's default custom-schema behavior differs from this
+project's naming contract; one macro makes the override explicit.
+
+**When and why used:** before creating resources, parse and inspect resolved
+schemas so snapshots and later Silver/Gold models land where intended.
 
 Create [generate_schema_name.sql](../macros/generate_schema_name.sql):
 
@@ -1332,7 +1917,15 @@ their resolved schema in `target/manifest.json`.
 
 ### Iteration 10. Register all five source tables, without columns or tests
 
-Start [the landing sources file](../models/landing/_landing__sources.yml) with:
+**Goal:** create source YAML containing only the five logical-to-physical mappings.
+
+**Reason and need:** prove dbt can name and read the inputs before adding
+field documentation or enforcing data assumptions.
+
+**When and why used:** after Landing pipeline acceptance and dbt connection,
+use `source()` as the stable dependency interface for every downstream resource.
+
+Start [the landing sources file](../models/000_Source/_landing__sources.yml) with:
 
 ```yaml
 version: 2
@@ -1345,7 +1938,7 @@ sources:
       - name: customer
         identifier: ld_oys_customer
       - name: customer_address
-        identifier: ld_oys_customeraddress
+        identifier: ld_oys_customeradress
       - name: account
         identifier: ld_oys_account
       - name: debitcard
@@ -1376,6 +1969,14 @@ resolves to `[lh_oyster_path].[dbo].[ld_oys_customer]`.
 
 ### Iteration 11. Add column names and descriptions to all sources
 
+**Goal:** extend the working source declarations with fields and meaning only.
+
+**Reason and need:** key and measure semantics should be reviewed before
+tests encode them; names alone do not explain what a source value represents.
+
+**When and why used:** after table discovery and sampling pass, document the
+contract used by snapshot attribute selection and Silver conversion design.
+
 Under each table, add its business columns. Initially, do not add tests.
 
 | Source | Business columns |
@@ -1403,6 +2004,14 @@ Preserve source spelling and case. In particular, the address CSV prefix is
 
 ### Iteration 12. Document types for all columns
 
+**Goal:** add documented SQL endpoint types without changing source values.
+
+**Reason and need:** readers need to distinguish raw text from timestamps;
+YAML metadata is documentation, not a cast or an enforced physical schema.
+
+**When and why used:** after field descriptions, compare with the endpoint
+schema and use the result to plan explicit downstream conversions.
+
 Add `data_type: varchar(8000)` to business fields and filename metadata.
 Use `datetime2(6)` for load timestamps.
 
@@ -1428,6 +2037,14 @@ Inspect the SQL endpoint schema to confirm actual physical types.
 
 ### Iteration 19. Add key tests to every source
 
+**Goal:** enforce unique and non-NULL business identifiers in persisted Landing.
+
+**Reason and need:** loader checks cover one writer, while dbt tests protect
+the contract against other writers and identify unsafe snapshot inputs.
+
+**When and why used:** only after tables and fields are described, run these
+checks before history writes and on every later ingestion acceptance.
+
 Under the business key column of each table:
 
 ```yaml
@@ -1447,6 +2064,14 @@ tests document assumptions and protect against other writers.
 `not_null` does not reject blank strings, and neither test trims whitespace.
 
 ### Iteration 20. Add one cross-table batch test
+
+**Goal:** detect different observed batch timestamps across the five sources.
+
+**Reason and need:** individually valid keys do not prove the tables belong
+to one delivery; mixed batches can produce incorrect history and joins.
+
+**When and why used:** after source key tests, gate Bronze writes following
+the full Landing child, especially when ingestion runs one entity at a time.
 
 Create [assert_landing_single_batch.sql](../tests/landing/assert_landing_single_batch.sql):
 
@@ -1486,6 +2111,14 @@ orphan-handling rules are defined. This does not mean every orphan is acceptable
 
 ### Iteration 21. Add one source-level freshness policy
 
+**Goal:** measure delivery recency using shared source configuration.
+
+**Reason and need:** valid but stale data can still mislead consumers;
+batch observation time prevents an old replay from appearing newly extracted.
+
+**When and why used:** once batch metadata exists, run freshness separately
+before builds when the delivery SLA requires a recency gate.
+
 Under `landing`, after `schema: dbo`:
 
 ```yaml
@@ -1515,6 +2148,14 @@ no delivery was missed or that batches were processed in order.
 
 ### Iteration 22. Start with one minimal customer snapshot
 
+**Goal:** declare Customer's key and business attributes for check-based SCD2.
+
+**Reason and need:** the source lacks a reliable row update timestamp;
+explicit attribute comparison avoids versions driven only by load metadata.
+
+**When and why used:** after Landing gates pass, develop one snapshot first;
+settle sentinel and delete behavior before executing its initial history load.
+
 Create [the snapshot YAML](../snapshots/bronze/_bronze__snapshots.yml) initially as:
 
 ```yaml
@@ -1543,6 +2184,14 @@ SQL snapshot blocks remain another valid form, not something inherently broken.
 
 ### Iteration 23. Choose a consistent current-row representation
 
+**Goal:** define the open-ended validity sentinel for every snapshot.
+
+**Reason and need:** consistent current-row filters simplify validation and
+downstream joins; changing the convention later requires a data migration.
+
+**When and why used:** before the first snapshot run, establish the end-date
+contract reused by current-key tests and Silver history projections.
+
 Add one shared project setting before the first live run:
 
 ```yaml
@@ -1557,6 +2206,14 @@ default NULL end date. Do not switch representation on populated snapshots
 without planning the migration of existing rows and downstream filters.
 
 ### Iteration 24. Use batch observation time for changed versions
+
+**Goal:** timestamp changed versions using the extract observation time.
+
+**Reason and need:** dbt execution time may differ from the observed delivery;
+historical interpretation needs an explicit time basis and ordering constraints.
+
+**When and why used:** before snapshot execution, configure `updated_at` and
+use ordered batches for later temporal dimension lookups.
 
 Add under the customer snapshot's `config`:
 
@@ -1584,6 +2241,14 @@ required.
   metadata is not a log of every successful load.
 
 ### Iteration 25. Make disappeared entities explicit
+
+**Goal:** preserve missing full-state keys as deletion versions.
+
+**Reason and need:** leaving disappeared rows active hides source deletions;
+tombstones make absence observable without discarding prior versions.
+
+**When and why used:** only for validated complete extracts, configure this
+before first execution; later consumers must distinguish deletion from inactivity.
 
 Add under snapshot `config`:
 
@@ -1620,6 +2285,14 @@ snapshots:
 It is not a complete physical copy of every row for every batch.
 
 ### Iteration 27. Apply the snapshot pattern to the other three entities
+
+**Goal:** add address, account, and card snapshots using the settled pattern.
+
+**Reason and need:** the algorithm is shared, but each entity has its own
+stable key and change-driving fields that must be declared deliberately.
+
+**When and why used:** after Customer's configuration is complete, expand
+the same YAML and verify all four resources before the Bronze baseline run.
 
 Append to the same snapshot YAML:
 
@@ -1668,6 +2341,14 @@ differ. No separate SQL models are required for these snapshot tables.
 
 ### Iteration 28. Choose event accumulation instead of SCD2
 
+**Goal:** choose immutable-event storage semantics for transactions.
+
+**Reason and need:** an event is not another account version; treating stable
+recurring IDs as new events would duplicate the deterministic sample.
+
+**When and why used:** before writing the ledger model, establish the identity
+and correction contract that justifies append plus an existing-ID filter.
+
 We deliberately kept the transaction ledger incremental after comparing:
 
 | Approach | Correct when |
@@ -1687,7 +2368,15 @@ assumption. New business events need globally stable, non-reused event IDs.
 
 ### Iteration 29. Add append with an existing-ID filter
 
-Create [b_oys_transaction_ledger.sql](../models/bronze/b_oys_transaction_ledger.sql).
+**Goal:** insert transactions only when their IDs are absent from the ledger.
+
+**Reason and need:** append alone repeats recurring input; ID-based filtering
+also accepts late events that a timestamp watermark might exclude.
+
+**When and why used:** after agreeing immutability, implement the incremental
+model and use it for sequential initial and recurring Bronze event loads.
+
+Create [b_oys_transaction_ledger.sql](../models/010_Bronze/b_oys_transaction_ledger.sql).
 At this iteration its config does not yet include the later full-refresh guard:
 
 ```sql
@@ -1726,6 +2415,14 @@ query work, even though it avoids rewriting old events.
 
 ### Iteration 30. Protect accumulated events from accidental full refresh
 
+**Goal:** prevent a routine dbt full refresh from rebuilding the ledger.
+
+**Reason and need:** latest Landing may contain only part of accumulated
+event history; an unrestricted rebuild could erase retained transactions.
+
+**When and why used:** before the first ledger execution, set the guard;
+recovery and schema migration must remain separately reviewed operations.
+
 Add to the model's `config`:
 
 ```sql
@@ -1740,6 +2437,14 @@ deletion. A deliberate recovery requires a planned rebuild from retained files
 and controlled replay, not simply removing the guard and running the latest batch.
 
 ### Iteration 31. Detect same-ID/different-values conflicts
+
+**Goal:** fail when an incoming existing ID carries different business values.
+
+**Reason and need:** the append filter would otherwise silently ignore a
+correction and conceal a violation of the agreed immutable-event contract.
+
+**When and why used:** after the ledger exists, run this explicitly before
+every subsequent append; its dependency does not make normal build a pre-load gate.
 
 Create [assert_transaction_events_immutable.sql](../tests/bronze/assert_transaction_events_immutable.sql):
 
@@ -1768,6 +2473,14 @@ a normal `dbt build` does not turn it into a pre-load gate automatically.
 
 ### Iteration 32. Add generic snapshot version tests to all four snapshots
 
+**Goal:** validate non-NULL business keys and unique, non-NULL version IDs.
+
+**Reason and need:** business keys repeat across valid history; the version
+identifier, not the historical business key, must be globally unique per snapshot.
+
+**When and why used:** once all snapshots are declared, attach tests in their
+resource YAML and run them after initial and recurring history writes.
+
 Under each snapshot, alongside `config`, add `columns`:
 
 ```yaml
@@ -1789,6 +2502,14 @@ business-key `unique` test across all snapshot versions. `dbt_scd_id` identifies
 the version row.
 
 ### Iteration 33. Check that each snapshot key has at most one current version
+
+**Goal:** reject multiple open-ended rows for the same entity business key.
+
+**Reason and need:** unique version IDs do not prevent duplicate current
+states; consumers need a single current version, including deletion tombstones.
+
+**When and why used:** add this shared singular test before accepting Bronze;
+rerun it after snapshots to detect invalid current-state history.
 
 Create [assert_bronze_current_keys_unique.sql](../tests/bronze/assert_bronze_current_keys_unique.sql):
 
@@ -1827,7 +2548,15 @@ overlapping historical intervals, or out-of-order input.
 
 ### Iteration 34. Add ledger output-key tests
 
-Create [the Bronze model YAML](../models/bronze/_bronze__models.yml):
+**Goal:** validate transaction identity in the accumulated ledger itself.
+
+**Reason and need:** input tests and the append filter cannot guarantee
+target uniqueness under every duplicate-input or concurrent-write scenario.
+
+**When and why used:** after declaring the ledger model, document its output
+contract and check it after every append before downstream consumption.
+
+Create [the Bronze model YAML](../models/010_Bronze/_bronze__models.yml):
 
 ```yaml
 version: 2
@@ -1851,6 +2580,14 @@ Freshness checks are separate from that data-test count.
 ## Part IX. Execute deliberately and observe the outcome
 
 ### Iteration 35. Create all five Bronze tables
+
+**Goal:** execute the first gated snapshot and ledger build in development.
+
+**Reason and need:** parsing does not create or validate stored history;
+ordered commands connect approved Landing data to tested Bronze outputs.
+
+**When and why used:** after all source/history configuration and tests exist,
+establish the baseline required for repeat-run and genuine-change demonstrations.
 
 Run the generator and loader in Fabric with the correct Lakehouse attached.
 For recurring event ingestion, process every required delivery, not merely
@@ -1894,6 +2631,14 @@ pipeline runs and concurrent landing replacements while dbt is reading.
 
 ### Iteration 36. Inspect rather than trusting a green command
 
+**Goal:** inspect persisted validity, deletion flags, and ledger cardinality.
+
+**Reason and need:** successful execution is not an explanation of the data;
+direct inspection verifies the intended history representation.
+
+**When and why used:** immediately after the baseline build, record evidence
+that will make later repeat-run and change tests falsifiable.
+
 In the Warehouse SQL editor, for a dev target:
 
 ```sql
@@ -1911,6 +2656,14 @@ Use `bronze` instead of `dev_bronze` only when intentionally inspecting prod.
 Check all four snapshot tables, not only customer.
 
 ### Iteration 37. Prove repeat-run safety without changing data
+
+**Goal:** demonstrate that repeated identical business input adds no rows.
+
+**Reason and need:** retries and recurring extracts must not manufacture
+snapshot versions or duplicate events merely because ingestion metadata changed.
+
+**When and why used:** after recording the baseline, compare counts across
+sequential reruns before relying on recurring orchestration.
 
 **Starting point:** deterministic data is already loaded into the Lakehouse
 Delta tables. Do not clear landing or Bronze. Existing data is exactly what
@@ -1967,7 +2720,253 @@ This proves the tested sequential repeat case, not exactly-once delivery under
 concurrent writers or arbitrary failures. It does not yet prove that genuine
 changes or new events are captured.
 
+### Iteration 37a. Demonstrate history and incremental append by editing Landing Delta
+
+**Goal:** change customer `1001`'s surname directly in the source Delta table
+and insert one new transaction, then observe their different Bronze effects.
+
+**Reason and need:** snapshots compare queryable source state, not CSV files.
+A direct source update demonstrates that an attribute change creates an SCD2
+version, while a new immutable transaction ID is appended once to the ledger.
+
+**When and why used:** after the snapshots and ledger exist and Iteration 37
+passes, use this optional exercise in an isolated development environment.
+It is an alternative to the generator-based exercise in Iteration 38, not
+a production ingestion procedure or a request to change live data now.
+
+Do not rerun the generator, loader, or master during the exercise: a Landing
+overwrite would erase the manual changes before dbt reads them. Pause other
+writers. Run the mutation snippets in a **Fabric Spark notebook** attached
+to the development `lh_oyster_path`, not in the Lakehouse SQL analytics
+endpoint (which is read-only) or the Warehouse. Keep raw files unchanged.
+
+#### Step 37a.1. Record the baseline and choose the demonstration identity
+
+**Goal:** prove the target customer/account exist and the new event ID is unused.
+
+**Reason and need:** an update matching no row proves nothing, and reusing an
+event ID would test immutability conflict rather than incremental insertion.
+
+**When and why used:** before any mutation, record the counts from Iteration 37
+and run this read-only T-SQL in the development Warehouse SQL editor:
+
+```sql
+select CustomerID, LastName, dbt_valid_from, dbt_valid_to, dbt_is_deleted
+from dev_bronze.b_oys_customer
+where CustomerID = '1001'
+order by dbt_valid_from;
+
+select CustomerID, LastName, meta_batch_timestamp
+from lh_oyster_path.dbo.ld_oys_customer
+where CustomerID = '1001';
+
+select AccountID, CustomerID
+from lh_oyster_path.dbo.ld_oys_account
+where AccountID = '2001' and CustomerID = '1001';
+
+select 'landing' as layer, count(*) as existing_demo_events
+from lh_oyster_path.dbo.ld_oys_transaction_ledger
+where TransactionID = 'DEMO_TX_1001_001'
+union all
+select 'bronze', count(*)
+from dev_bronze.b_oys_transaction_ledger
+where TransactionID = 'DEMO_TX_1001_001';
+```
+
+Proceed only when Landing has exactly one customer `1001`, its current
+non-deleted Bronze version agrees with Landing, its surname is not already
+`TutorialSurname`, account `2001` belongs to it, and both event counts are zero.
+Otherwise stop and select an intentional different surname or unused event ID
+consistently throughout the exercise; do not alter an existing event.
+
+The snippets use `2026-11-20 12:00:00` as an **example UTC demonstration
+observation time**. Before running them, replace this literal everywhere with
+one real UTC time strictly later than all existing Landing batch timestamps
+and the latest Bronze validity start (including any deletion observation).
+Inspect all five sources and four snapshots, not only customer `1001`.
+Do not choose a future time or reuse an earlier observation for changed data.
+
+#### Step 37a.2. Advance the shared demonstration observation time
+
+**Goal:** keep all five sources on one later observation before changing a value.
+
+**Reason and need:** `updated_at: meta_batch_timestamp` controls snapshot
+boundaries. Keeping the old time could create a zero-length version; changing
+only Customer's timestamp would fail the cross-table batch test.
+
+**When and why used:** before the surname update, run this Spark SQL cell.
+The five commits are not atomic: if any update fails, stop and complete the
+same timestamp alignment before running dbt.
+
+```sql
+%%sql
+SET spark.sql.session.timeZone=UTC;
+
+UPDATE dbo.ld_oys_customer
+SET meta_batch_timestamp = CAST('2026-11-20 12:00:00' AS TIMESTAMP),
+  meta_load_timestamp = CAST('2026-11-20 12:00:00' AS TIMESTAMP);
+
+UPDATE dbo.ld_oys_customeradress
+SET meta_batch_timestamp = CAST('2026-11-20 12:00:00' AS TIMESTAMP),
+  meta_load_timestamp = CAST('2026-11-20 12:00:00' AS TIMESTAMP);
+
+UPDATE dbo.ld_oys_account
+SET meta_batch_timestamp = CAST('2026-11-20 12:00:00' AS TIMESTAMP),
+  meta_load_timestamp = CAST('2026-11-20 12:00:00' AS TIMESTAMP);
+
+UPDATE dbo.ld_oys_debitcard
+SET meta_batch_timestamp = CAST('2026-11-20 12:00:00' AS TIMESTAMP),
+  meta_load_timestamp = CAST('2026-11-20 12:00:00' AS TIMESTAMP);
+
+UPDATE dbo.ld_oys_transaction_ledger
+SET meta_batch_timestamp = CAST('2026-11-20 12:00:00' AS TIMESTAMP),
+  meta_load_timestamp = CAST('2026-11-20 12:00:00' AS TIMESTAMP);
+```
+
+This deliberately creates a **synthetic teaching observation** in Landing,
+not a newly extracted raw batch. The metadata is assigned for the exercise;
+it no longer describes an unmodified file-to-table load. Retain the original
+batch identity, these SQL statements, and the chosen time in your exercise
+notes. Do not rename raw folders or claim a corresponding CSV delivery exists.
+Unchanged business attributes will not create snapshot versions merely
+because all five tables now carry new ingestion metadata.
+
+#### Step 37a.3. Update the surname and insert one new transaction
+
+**Goal:** introduce one descriptive change and one new immutable event.
+
+**Reason and need:** these minimal mutations isolate SCD2 versioning from
+incremental accumulation; explicit columns retain the Landing text contract.
+
+**When and why used:** after timestamp alignment, run the following Spark SQL
+cell. The source-file marker identifies manual SQL, not a fictitious CSV file.
+The `NOT EXISTS` guard makes repeating this insertion a no-op; it does not
+protect against concurrent writers, so keep the exercise serialized.
+
+```sql
+%%sql
+UPDATE dbo.ld_oys_customer
+SET LastName = 'TutorialSurname',
+  meta_source_file = 'manual_sql_demo'
+WHERE CustomerID = '1001';
+
+INSERT INTO dbo.ld_oys_transaction_ledger (
+  TransactionID, AccountID, Amount, `Timestamp`,
+  meta_batch_timestamp, meta_load_timestamp, meta_source_file
+)
+SELECT
+  'DEMO_TX_1001_001', '2001', '12.34', '2026-11-09 12:00:00',
+  CAST('2026-11-20 12:00:00' AS TIMESTAMP),
+  CAST('2026-11-20 12:00:00' AS TIMESTAMP),
+  'manual_sql_demo'
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM dbo.ld_oys_transaction_ledger
+  WHERE TransactionID = 'DEMO_TX_1001_001'
+);
+```
+
+`Timestamp` is backtick-quoted for Spark; the later Warehouse query uses
+`[Timestamp]`. Business values, including `Amount`, remain strings in Landing.
+The event date deliberately falls within the sample's reporting period,
+showing that an unseen late event is accepted without a maximum-time watermark.
+If the source has extra required/non-null fields beyond this documented
+contract, extend the explicit insert columns and values before executing it.
+
+#### Step 37a.4. Make the changes visible and run the gated Bronze load
+
+**Goal:** let dbt observe the new source state and process both change types.
+
+**Reason and need:** Spark commits can precede SQL endpoint visibility;
+dbt must read the changed surname, new event, and aligned timestamps, not stale data.
+
+**When and why used:** after mutation, refresh the Lakehouse SQL endpoint
+metadata as described in O2/O4, or wait for synchronization and explicitly
+verify it with read-only queries. Do not run the master to obtain the refresh:
+its earlier loader would overwrite this exercise.
+
+Rerun Step 37a.1's source queries through the Warehouse connection. Require
+`TutorialSurname`, one Landing demo event but zero Bronze demo events, and
+the selected demonstration time across all five source tables (use the
+full-batch aggregate check from the complete loader section). Then execute
+from the dbt project directory, stopping on each failure:
+
+```powershell
+& ..\.venv\Scripts\dbt.exe source freshness --target dev --profiles-dir .
+if ($LASTEXITCODE -ne 0) { throw 'Freshness failed; stop before Bronze writes.' }
+& ..\.venv\Scripts\dbt.exe test --select source:landing assert_landing_single_batch --target dev --profiles-dir .
+if ($LASTEXITCODE -ne 0) { throw 'Landing validation failed; stop before Bronze writes.' }
+& ..\.venv\Scripts\dbt.exe test --select assert_transaction_events_immutable --target dev --profiles-dir .
+if ($LASTEXITCODE -ne 0) { throw 'Event conflict detected; stop before loading.' }
+& ..\.venv\Scripts\dbt.exe snapshot --threads 1 --target dev --profiles-dir .
+if ($LASTEXITCODE -ne 0) { throw 'Snapshot failed; stop the demonstration.' }
+& ..\.venv\Scripts\dbt.exe run --select b_oys_transaction_ledger --target dev --profiles-dir .
+if ($LASTEXITCODE -ne 0) { throw 'Ledger append failed.' }
+& ..\.venv\Scripts\dbt.exe test --select path:snapshots/bronze path:models/010_Bronze path:tests/bronze --target dev --profiles-dir .
+if ($LASTEXITCODE -ne 0) { throw 'Bronze validation failed.' }
+```
+
+#### Step 37a.5. Inspect history, then prove the unchanged repeat is safe
+
+**Goal:** observe the closed old customer version and exactly one appended event.
+
+**Reason and need:** green commands alone do not prove historization or
+once-only insertion; inspect validity boundaries, values, and count deltas.
+
+**When and why used:** immediately after the gated load, run this read-only
+T-SQL in the development Warehouse SQL editor and compare the recorded counts:
+
+```sql
+select CustomerID, LastName, dbt_scd_id,
+     dbt_valid_from, dbt_valid_to, dbt_is_deleted,
+     meta_batch_timestamp, meta_source_file
+from dev_bronze.b_oys_customer
+where CustomerID = '1001'
+order by dbt_valid_from;
+
+select TransactionID, AccountID, Amount, [Timestamp],
+     meta_batch_timestamp, meta_source_file
+from dev_bronze.b_oys_transaction_ledger
+where TransactionID = 'DEMO_TX_1001_001';
+```
+
+**Acceptance:** Customer's stored count increases by one. Its former current
+row retains the old surname and closes at the demonstration time; the new
+`TutorialSurname` row starts at that time and ends at `9999-12-31`, with
+`dbt_is_deleted = 'False'`. Address, account, and card snapshot counts do not
+change. The ledger count increases by exactly one, containing the demo ID
+with account `2001` and amount `12.34`; all existing events remain unchanged.
+
+Without rerunning the mutation cells, generator, or loader, repeat Step
+37a.4's dbt commands and these inspections. All stored counts and customer
+version IDs must remain unchanged: the check strategy sees no further surname
+change, and the incremental model skips the already-loaded transaction ID.
+
+**After the exercise:** preserve the demonstration history or deliberately
+restore the customer through a strictly later observation. Never rewind a
+snapshot timestamp or delete the Bronze event to recover the old totals.
+A later baseline Landing overwrite followed by snapshots will record a
+surname reversal; the appended event remains. If you rebuild Silver/Gold,
+their amounts and the historical report acceptance figures will change.
+The JSON comparison table and raw CSV/JSON files do not contain the manually
+inserted event, so do not expect file-format reconciliation to pass until
+you intentionally restore aligned inputs. Choose the generator-based path
+below instead when a retained, replayable raw delivery is part of the lesson.
+
 ### Iteration 38. Demonstrate one real business change
+
+**Goal:** verify controlled attribute changes and seven genuinely new events.
+
+**Reason and need:** idempotence alone can also describe a loader that never
+captures change; positive tests must demonstrate intended new history and events.
+
+**When and why used:** after repeat-run checks, use an isolated later delivery
+to prove exact snapshot/ledger deltas and another unchanged rerun.
+
+Use this generator-based route when demonstrating file-to-history ingestion;
+Iteration 37a above demonstrates the same Bronze mechanisms by editing the
+source Delta tables directly. Run each route from its own understood baseline
+and do not combine their expected count deltas.
 
 This is a controlled **future verification exercise**, not a data change already
 performed. The generator supports it through its `p_simulate_changes` parameter
@@ -2032,6 +3031,14 @@ business-change history. Do not change the random seed just to manufacture one
 change: that could alter many unrelated rows.
 
 ### Iteration 39. Demonstrate deletion and event conflict separately
+
+**Goal:** verify tombstones, immutable-event rejection, and new-event insertion.
+
+**Reason and need:** each behavior has different inputs and expected effects;
+separate exercises identify which contract failed without mixing changes.
+
+**When and why used:** after baseline and change checks, complete Bronze
+acceptance in development before deriving or publishing downstream models.
 
 **Snapshot deletion:** in another complete delivery, remove one customer, keeping
 the table non-empty. After validation and snapshotting, inspect the closed row
@@ -2103,19 +3110,28 @@ unnecessarily large.
 
 ### Iteration 40. Configure the Silver model folder once
 
+**Goal:** establish shared Silver schema and materialization defaults.
+
+**Reason and need:** table and staging responsibilities should be
+consistent before models are added; repeated model-level settings would drift.
+
+**When and why used:** after Bronze acceptance, configure the folder used by
+all typed staging, intermediate tables, dimensions, and facts developed next.
+
 Under `models.dbt_oyster_path` in the project configuration, preserve the
-existing example settings and add:
+existing example settings and configure BIS and Silver:
 
 ```yaml
-    silver:
+    015_BIS:
       +schema: silver
       +materialized: table
-      staging:
-        +materialized: view
+    020_Silver:
+      +schema: silver
+      +materialized: table
 ```
 
-**Why:** every model under `models/silver` receives the same schema and default
-table materialization. Models under its `staging` subfolder use views instead.
+**Why:** BIS models under `models/015_BIS` use tables in the Silver schema;
+models under `models/020_Silver` use the same schema with table materialization.
 This is one shared change, not one change per future dimension.
 
 The existing environment schema macro resolves `dev_silver` for dev and `silver`
@@ -2169,26 +3185,34 @@ is added. It does not verify physical Warehouse creation or SQL execution.
 - Building Silver SCD2 from Bronze must preserve changes between Silver runs,
   not merely compare the latest current rows.
 
-### Iteration 41. Add typed staging views for all five Bronze entities
+### Iteration 41. Add typed staging tables for all five Bronze entities
 
-**Change:** create five models under `models/silver/staging`, with descriptions
-in [the staging YAML](../models/silver/staging/_silver__staging.yml):
+**Goal:** rename, normalize, and type each Bronze entity without losing history.
+
+**Reason and need:** temporal models need consistent inputs, while raw values
+must remain available to explain failed casts or key normalization.
+
+**When and why used:** after Silver configuration, add these reusable tables
+before joins; the next iteration validates their conversion and history contracts.
+
+**Change:** create five models under `models/015_BIS/staging`, with descriptions
+in [the staging YAML](../models/015_BIS/staging/_silver__staging.yml):
 
 | Model | Typed/normalized business fields |
 |---|---|
-| [bis_dim_customer_staging](../models/silver/staging/bis_dim_customer_staging.sql) | customer_id, first_name, last_name |
-| [bis_dim_customer_address_staging](../models/silver/staging/bis_dim_customer_address_staging.sql) | address_id, customer_id, address_type, country, postal_code, city, street, house_number |
-| [bis_dim_account_staging](../models/silver/staging/bis_dim_account_staging.sql) | account_id, customer_id, balance |
-| [bis_dim_debitcard_staging](../models/silver/staging/bis_dim_debitcard_staging.sql) | card_id, account_id, card_tier, is_active |
-| [bis_fct_transaction_staging](../models/silver/staging/bis_fct_transaction_staging.sql) | transaction_id, account_id, amount, transaction_timestamp |
+| [bis_dim_customer_staging](../models/015_BIS/staging/bis_dim_customer_staging.sql) | customer_id, first_name, last_name |
+| [bis_dim_customer_address_staging](../models/015_BIS/staging/bis_dim_customer_address_staging.sql) | address_id, customer_id, address_type, country, postal_code, city, street, house_number |
+| [bis_dim_account_staging](../models/015_BIS/staging/bis_dim_account_staging.sql) | account_id, customer_id, balance |
+| [bis_dim_debitcard_staging](../models/015_BIS/staging/bis_dim_debitcard_staging.sql) | card_id, account_id, card_tier, is_active |
+| [bis_fct_transaction_staging](../models/015_BIS/staging/bis_fct_transaction_staging.sql) | transaction_id, account_id, amount, transaction_timestamp |
 
 This is one iteration because all five apply the same staging responsibility:
 rename, normalize, convert, and preserve lineage without joining or filtering.
-The shared folder configuration creates views in `dev_silver` for dev.
+The shared folder configuration creates tables in `dev_silver` for dev.
 
-#### Why staging views instead of going directly to dimensions?
+#### Why staging tables instead of going directly to dimensions?
 
-These are **views, not additional stored tables**. They separate two
+These are **persisted tables**. They separate two
 responsibilities:
 
 1. **Staging:** clean and type individual Bronze entities while preserving their
@@ -2198,7 +3222,7 @@ responsibilities:
 
 ```text
 Bronze account history
-    -> staging view: trim IDs, convert Balance, preserve every version
+    -> staging table: trim IDs, convert Balance, preserve every version
     -> Silver dimension: determine descriptive SCD2 versions
 ```
 
@@ -2211,15 +3235,14 @@ Bronze account history
   without duplicating conversion expressions.
 - Bronze remains unchanged and available for replay.
 
-**Trade-off:** five view definitions add another dependency layer to navigate.
-Views do not persist a second copy of the data or cache the conversion results;
-queries still execute their underlying logic.
+**Trade-off:** persisted staging tables add storage and rebuild time. They
+capture the source state at build time, rather than automatically reflecting
+later Bronze changes. Rebuild them in dependency order after Bronze updates
+and before downstream models or tests; do not treat stale tables as current.
 
-**Decision point:** Kimball and SCD2 do not require staging views. The same
-transformations could live in CTEs inside dimension and fact models. We chose
-lightweight views because historical joins will be complex and the cleaned
-inputs are reusable. They are an implementation convenience, not another
-business layer or a prerequisite for historization.
+**Decision point:** Kimball and SCD2 do not require staging tables. These
+reusable tables follow the solution design's BIS materialization; they are
+not a prerequisite for historization.
 
 **IDs remain text:** use `nullif(trim(CustomerID), '')`, not a numeric cast.
 Leading zeros can be meaningful. Preserve the original value as
@@ -2259,7 +3282,7 @@ Date/time dimension design must establish the business timezone convention.
 and `false`/`0` to bit 0; all other values become NULL. The raw activity value is
 retained. Do not equate an inactive card with a deleted card.
 
-**History preservation:** the four snapshot-backed views retain every row,
+**History preservation:** the four snapshot-backed tables retain every row,
 including tombstones, with:
 
 ```sql
@@ -2282,26 +3305,34 @@ lineage identifiers, not yet Silver dimension surrogate keys.
 
 ```powershell
 ..\.venv\Scripts\dbt.exe parse --profiles-dir .
-..\.venv\Scripts\dbt.exe ls --select path:models/silver/staging --resource-type model --profiles-dir .
+..\.venv\Scripts\dbt.exe ls --select path:models/015_BIS/staging --resource-type model --profiles-dir .
 ```
 
 On an authenticated, approved network, after Bronze exists:
 
 ```powershell
-..\.venv\Scripts\dbt.exe run --select path:models/silver/staging --profiles-dir .
+..\.venv\Scripts\dbt.exe run --select path:models/015_BIS/staging --profiles-dir .
 ```
 
-**Expected:** five views, with the same row counts as their Bronze inputs.
-View creation and parsing do not prove valid conversions. These views are
+**Expected:** five tables, with the same row counts as their Bronze inputs.
+Table creation and parsing do not prove valid conversions. These tables are
 inspectable preparation, not approved inputs to a published star yet.
 
 ### Iteration 42. Validate staging before building dimensions
 
-Add these tests to [the staging YAML](../models/silver/staging/_silver__staging.yml).
-This is one shared validation change across all five views, not five separate
+**Goal:** reject invalid conversions, required fields, and observation intervals.
+
+**Reason and need:** successful table creation does not prove usable data;
+overlapping histories or NULL converted keys can corrupt downstream joins.
+
+**When and why used:** immediately after staging exists, run these gates
+before constructing dimensions or facts from its normalized values.
+
+Add these tests to [the staging YAML](../models/015_BIS/staging/_silver__staging.yml).
+This is one shared validation change across all five tables, not five separate
 modelling steps.
 
-| View | Required normalized/converted columns (`not_null`) |
+| Model | Required normalized/converted columns (`not_null`) |
 |---|---|
 | Customer | customer_id |
 | Address | address_id, customer_id, address_type |
@@ -2322,10 +3353,10 @@ activity flags must produce visible test failures. We require these fields
 for this exercise; descriptive fields such as surname and postal code do not
 become mandatory without a business requirement.
 
-For each snapshot-backed staging view, add `unique` and `not_null` on
+For each snapshot-backed staging table, add `unique` and `not_null` on
 `bronze_version_id`, plus `not_null` on `observed_valid_from`,
 `observed_valid_to`, and `is_deleted`. Test normalized `transaction_id` for
-uniqueness in the ledger view. Do not test historical dimension business keys
+uniqueness in the ledger staging table. Do not test historical dimension business keys
 for uniqueness across versions.
 
 Create [the shared interval test](../tests/silver/assert_staging_history_intervals.sql).
@@ -2356,10 +3387,10 @@ does not prove that distinct raw keys with disjoint intervals identify the same
 business entity. Missing timestamps are handled by the separate `not_null`
 tests. Decimal rounding/scale checks and relationship rules remain future work.
 
-Run after Bronze and the five staging views exist:
+Run after Bronze and the five staging tables are rebuilt:
 
 ```powershell
-..\.venv\Scripts\dbt.exe test --select path:models/silver/staging assert_staging_history_intervals --profiles-dir .
+..\.venv\Scripts\dbt.exe test --select path:models/015_BIS/staging assert_staging_history_intervals --profiles-dir .
 ```
 
 **Expected:** 36 Silver staging tests pass (35 generic tests and one interval
@@ -2367,6 +3398,14 @@ test). Severity defaults to `error`. Stop on failure before building dimensions.
 Parsing or test discovery is not evidence that these data checks passed live.
 
 ### Iteration 43. Establish the address contract before denormalization
+
+**Goal:** define supported address types and one occupied slot per customer/type.
+
+**Reason and need:** joining ambiguous one-to-many addresses can multiply
+customer states and transaction measures; missing types need an explicit policy.
+
+**When and why used:** before customer timeline construction, test the
+cardinality that makes three independent temporal address joins safe.
 
 **Approved dimension layout:** include Permanent, Mailing, and Billing address
 attributes as three separate column groups in `s_dim_customer`. An absent type
@@ -2419,7 +3458,7 @@ customer referential integrity. The separate interval/not-null tests still
 validate basic history integrity and required fields.
 
 ```powershell
-..\.venv\Scripts\dbt.exe test --select path:models/silver/staging assert_staging_history_intervals assert_customer_address_type_intervals --profiles-dir .
+..\.venv\Scripts\dbt.exe test --select path:models/015_BIS/staging assert_staging_history_intervals assert_customer_address_type_intervals --profiles-dir .
 ```
 
 **Expected:** 38 Silver staging tests pass, including the two new contract
@@ -2432,12 +3471,18 @@ customer SCD2 version; load-metadata-only differences must not.
 
 ### Iteration 44. Construct the customer history timeline
 
-Create [bis_dim_customer_intervals](../models/silver/intermediate/bis_dim_customer_intervals.sql)
-as a view. Before joining attributes, combine boundary dates from both histories:
+**Goal:** derive candidate intervals from customer and address boundaries.
+
+**Reason and need:** customer-only dates miss address changes; a shared
+timeline makes each included attribute constant within a candidate interval.
+
+**When and why used:** after staging/address gates pass, build and inspect
+this table before introducing attribute joins or coalescing.
+
+Create [bis_dim_customer_intervals](../models/015_BIS/intermediate/bis_dim_customer_intervals.sql)
+as a table. Before joining attributes, combine boundary dates from both histories:
 
 ```sql
-{{ config(materialized='view') }}
-
 with boundaries as (
     select customer_id, observed_valid_from as boundary_at
     from {{ ref('bis_dim_customer_staging') }}
@@ -2486,22 +3531,30 @@ and Permanent/Mailing/Billing addresses for each candidate interval, followed by
 coalescing adjacent periods with identical business state.
 
 **Preconditions:** staging interval, required-field, and address ambiguity tests
-must pass. The view constructs boundaries; it does not repair invalid histories
+must pass. The table constructs boundaries; it does not repair invalid histories
 or choose between overlapping address versions.
 
 ```powershell
 ..\.venv\Scripts\dbt.exe run --select bis_dim_customer_intervals --profiles-dir .
 ```
 
-Run on the approved Fabric network after the staging views exist.
+Run on the approved Fabric network after the staging tables are rebuilt.
 Acceptance cases include simultaneous customer/address changes, address removal,
 customer coverage gaps, retained deletion periods, and separate customers.
 Local fixture verification is not a substitute for live Fabric SQL validation.
 
 ### Iteration 45. Resolve customer attributes and all three address groups
 
-Create [bis_dim_customer_states](../models/silver/intermediate/bis_dim_customer_states.sql)
-as a view over the candidate timeline. Keep one state per customer and interval.
+**Goal:** attach one customer state and eligible addresses to each interval.
+
+**Reason and need:** boundaries alone carry no business attributes; temporal
+joins must retain missing address types without multiplying timeline rows.
+
+**When and why used:** after timeline acceptance, reconcile joined states
+before merging equal adjacent states into final dimension versions.
+
+Create [bis_dim_customer_states](../models/015_BIS/intermediate/bis_dim_customer_states.sql)
+as a table over the candidate timeline. Keep one state per customer and interval.
 The model uses Jinja to apply this address join identically to Permanent,
 Mailing, and Billing:
 
@@ -2557,16 +3610,24 @@ or altered intervals.
 ..\.venv\Scripts\dbt.exe test --select assert_customer_states_unique assert_customer_states_reconcile --profiles-dir .
 ```
 
-Run after upstream views exist and their validation tests pass. Local fixtures
+Run after upstream tables are rebuilt and their validation tests pass. Local fixtures
 cover missing types, address changes/removal, boundary equality, tombstones, and
 the reconciliation failure cases; live Fabric execution remains a separate check.
 
 **Next:** coalesce adjacent equal states and assign deterministic dimension
-version keys. This intermediate view is not yet the final SCD2 dimension.
+version keys. This intermediate table is not yet the final SCD2 dimension.
 
 ### Iteration 46. Materialize the customer business SCD2 dimension
 
-Create [s_dim_customer](../models/silver/s_dim_customer.sql), inheriting Silver's
+**Goal:** coalesce equal touching states and assign stable customer version keys.
+
+**Reason and need:** observation boundaries can create redundant periods;
+business SCD2 must preserve real changes, reversals, gaps, and deletions.
+
+**When and why used:** after state reconciliation passes, materialize and test
+the dimension that later facts reference by deterministic surrogate key.
+
+Create [s_dim_customer](../models/020_Silver/s_dim_customer.sql), inheriting Silver's
 table materialization. It contains customer names, all three address groups,
 `customer_id`, `customer_key`, `valid_from`, `valid_to`, `is_current`, and
 `is_deleted`. No unknown member is introduced yet.
@@ -2614,13 +3675,18 @@ configured `9999-12-31` sentinel. A current tombstone is both current and delete
 Do not confuse “latest observed row” with “currently active customer.”
 
 Add seven generic tests in
-[the dimension YAML](../models/silver/_silver__dimensions.yml): unique/non-null
+[the dimension YAML](../models/020_Silver/_silver__dimensions.yml): unique/non-null
 version key and non-null customer ID, boundaries, and flags. Add
 [interval validation](../tests/silver/assert_dim_customer_intervals.sql) and
 [current-key uniqueness](../tests/silver/assert_dim_customer_current_unique.sql)
 as two singular tests. Nullability tests complement, not replace, temporal tests.
 
-Run all upstream history/address/state validations first. After their views
+**Testing note:** if composite uniqueness checks become common, move the repeated
+pattern into a generic test, using `dbt-utils` or a project-owned test, to reduce
+duplication. Keep singular SQL tests for checks that need model-specific filters
+or additional logic.
+
+Run all upstream history/address/state validations first. After their tables
 exist and tests pass, execute:
 
 ```powershell
@@ -2635,8 +3701,16 @@ table creation, and live data tests still require a Fabric-connected run.
 
 ### Iteration 47. Apply business SCD2 to accounts and debit cards
 
-Create [s_dim_account](../models/silver/s_dim_account.sql) and
-[s_dim_debitcard](../models/silver/s_dim_debitcard.sql). These are rebuilt Silver
+**Goal:** derive account and card versions using their descriptive attributes.
+
+**Reason and need:** balance-only observations must not create account
+dimension versions; two matching algorithms now justify a shared macro.
+
+**When and why used:** after proving customer coalescing, reuse the pattern
+for ownership and card history required by later transaction and tier facts.
+
+Create [s_dim_account](../models/020_Silver/s_dim_account.sql) and
+[s_dim_debitcard](../models/020_Silver/s_dim_debitcard.sql). These are rebuilt Silver
 tables derived from complete Bronze observation histories, not new snapshots.
 
 | Model | Business key | Attributes defining versions |
@@ -2694,14 +3768,14 @@ open-ended version, not an active entity. Card `is_active` and `is_deleted`
 remain independent flags.
 
 Add eight generic tests for account and nine for debit card in
-[dimension YAML](../models/silver/_silver__dimensions.yml). Required fields
+[dimension YAML](../models/020_Silver/_silver__dimensions.yml). Required fields
 include their business references; card tier remains nullable because no
 mandatory-tier business rule has been agreed.
 Add shared [interval validation](../tests/silver/assert_account_card_dimension_intervals.sql)
 and [current-version uniqueness](../tests/silver/assert_account_card_current_unique.sql)
 tests, partitioning by entity and normalized business key.
 
-After staging validation passes and its views exist:
+After staging validation passes and its tables exist:
 
 ```powershell
 ..\.venv\Scripts\dbt.exe run --select s_dim_account s_dim_debitcard --profiles-dir .
@@ -2715,8 +3789,16 @@ live table creation still require the authenticated Fabric-connected run.
 
 ### Iteration 48. Add date and time-of-day reference dimensions
 
-Create [s_dim_date](../models/silver/s_dim_date.sql) and
-[s_dim_time](../models/silver/s_dim_time.sql) as Silver tables.
+**Goal:** create complete day-grain and second-grain reference tables.
+
+**Reason and need:** facts need stable calendar/clock keys, including periods
+with no activity; a combined date-by-second table would grow unnecessarily.
+
+**When and why used:** before fact lookups, validate configured date coverage
+and the 86400-second clock so missing keys cannot silently drop transactions.
+
+Create [s_dim_date](../models/020_Silver/s_dim_date.sql) and
+[s_dim_time](../models/020_Silver/s_dim_time.sql) as Silver tables.
 These are static reference dimensions, not SCD2 histories.
 
 | Model | Grain | Key |
@@ -2774,6 +3856,15 @@ before the fact is published; do not silently discard unmatched dates.
 
 ### Iteration 49. Make missing historical coverage explicit
 
+**Goal:** define unmatched lookup behavior and add customer/account Unknown rows.
+
+**Reason and need:** pre-observation events lack proven ownership or attributes;
+explicit Unknown members preserve their measures without inventing history.
+
+**When and why used:** before implementing the fact, test this strict policy.
+Iteration 56 later adds an explicit, flagged initial-history inference option;
+do not confuse that later assumption with the strict baseline developed here.
+
 **Problem:** generated transactions can predate our first source extraction.
 Dimension intervals begin when attributes were observed, not necessarily when
 they became true in the business. Assigning the first known version to every
@@ -2801,8 +3892,8 @@ not make that assumption. Initial reports can therefore legitimately contain
 many Unknown transactions. Their amounts must still be retained and reconciled.
 
 **Implemented in this iteration:** add one synthetic row to each of
-[s_dim_customer](../models/silver/s_dim_customer.sql) and
-[s_dim_account](../models/silver/s_dim_account.sql):
+[s_dim_customer](../models/020_Silver/s_dim_customer.sql) and
+[s_dim_account](../models/020_Silver/s_dim_account.sql):
 
 | Attribute | Unknown customer | Unknown account |
 |---|---|---|
@@ -2880,9 +3971,17 @@ of those lookups or error gates.
 
 ### Iteration 50. Build the transaction star fact
 
+**Goal:** retain one immutable event with account, customer, date, and time keys.
+
+**Reason and need:** event-time attribution requires temporal ownership and
+customer lookups; unmatched or ambiguous joins must not lose or inflate measures.
+
+**When and why used:** after dimension and Unknown contracts pass, build the
+fact and validate grain, lineage, amounts, relationships, and temporal mapping.
+
 **Grain:** one immutable source `TransactionID` per row. The ID is a degenerate
 dimension; there is no need to invent another transaction surrogate key.
-[s_fct_transaction](../models/silver/s_fct_transaction.sql) inherits Silver's
+[s_fct_transaction](../models/020_Silver/s_fct_transaction.sql) inherits Silver's
 `table` materialization, not incremental append. Bronze retains immutable events;
 Silver rebuilds their dimensional attribution when new history becomes available.
 This avoids permanently freezing an early Unknown assignment.
@@ -2954,7 +4053,7 @@ currency or balance semantics. Retain normalized/raw transaction and account
 IDs plus original batch/load/file metadata; do not replace them with rebuild
 timestamps. Balance remains a separate future grain decision.
 
-**Tests added** in [fact metadata](../models/silver/_silver__facts.yml) and
+**Tests added** in [fact metadata](../models/020_Silver/_silver__facts.yml) and
 [Silver tests](../tests/silver): 20 tests (17 generic and three singular).
 
 - Unique/non-null transaction IDs, required source fields and dimension keys.
@@ -3016,6 +4115,14 @@ decimal arithmetic/adapter deployment.
 
 ### Iteration 51. Make Silver acceptance repeatable
 
+**Goal:** name the upstream read-only gate and complete Silver build selection.
+
+**Reason and need:** an ancestor selection can write Bronze and omit independent
+models; acceptance must explicitly include every Silver dependency and test.
+
+**When and why used:** once the Silver star exists, preview selectors and
+reuse these commands for development checks and the later orchestration runner.
+
 **Reason:** `+s_fct_transaction` selects its ancestors, including mutable Bronze
 resources, but does not include the independent card dimension. A Silver-only
 acceptance run should be explicit about what it reads and writes.
@@ -3025,7 +4132,7 @@ Add [named selectors](../selectors.yml):
 - `silver_upstream_checks`: generic and singular tests for existing Landing and
   Bronze relations, including snapshot and source column tests. It selects only
   tests, not the models/snapshots themselves.
-- `silver`: every model under `models/silver` plus every shared singular test
+- `silver`: every model under `models/015_BIS` and `models/020_Silver` plus every shared singular test
   under `tests/silver`. Generic model tests are included by dbt's normal indirect
   selection. Includes card, calendar, staging, intermediate models, dimensions,
   and transaction fact.
@@ -3033,8 +4140,9 @@ Add [named selectors](../selectors.yml):
 Neither selector runs the loader or updates Bronze. Existing Landing/Bronze
 relations must already exist, and their data must represent the intended
 processed batch. A skipped source delivery is not repaired by rebuilding Silver.
-Do not run concurrent loaders/snapshots during acceptance: views read their
-current inputs, and these commands do not pin a cross-table source version.
+Do not run concurrent loaders/snapshots during acceptance: the models read
+their inputs at different times, and these commands do not pin a cross-table
+source version.
 
 **Preview before writes**, from the dbt project directory:
 
@@ -3137,6 +4245,15 @@ Live Warehouse execution and controlled publication remain external verification
 
 ### Iteration 52. Attempt live development acceptance and stop at the input gate
 
+**Goal:** run the upstream gate and classify failures before further writes.
+
+**Reason and need:** local parse/fixture success cannot prove remote table
+availability; missing relations and data violations require different remedies.
+
+**When and why used:** at the first live acceptance attempt, inspect the
+recorded failure below as a troubleshooting exercise, not a required failure
+to reproduce. A fresh complete build should pass and skip irrelevant repairs.
+
 The user approved live validation against the configured development target.
 Run the upstream gate explicitly against `dev`:
 
@@ -3181,11 +4298,25 @@ findings were addressed in iteration 54 below.
 **Goal:** prepare a stable Gold projection of the Silver star schema and add
 the account/day dataset needed by the exercise's tier-alignment report.
 
-**Why:** Silver owns conformed history and event-time attribution. Gold should
+**Reason and need:** Silver owns conformed history and event-time attribution. Gold should
 provide an explicit, consumer-facing projection rather than duplicate or
 redefine that logic. The daily account snapshot is a different fact from the
 transaction ledger: each row represents one account at the end of one
 snapshot date.
+
+**When and why used:** after Silver modeling and selector checks, develop Gold
+locally in the small substeps below. Execute it only after the upstream live
+gate passes; reporting consumes its tested, explicit column contract.
+
+#### Step 53a. Configure Gold without adding a model yet
+
+**Goal:** establish the Gold schema, table default, thresholds, and end date.
+
+**Reason and need:** consumer policy must be explicit before implementing
+classification; configuration alone must not be mistaken for published data.
+
+**When and why used:** first in Gold development, parse the settings before
+adding projections that will inherit them.
 
 Configure Gold tables in [dbt_project.yml](../dbt_project.yml):
 
@@ -3197,7 +4328,7 @@ vars:
 
 models:
   dbt_oyster_path:
-    gold:
+    030_Gold:
       +schema: gold
       +materialized: table
 ```
@@ -3212,6 +4343,16 @@ does not use the current date. It keeps daily account snapshots from the first
 transaction date through the configured end date, bounded by the latest
 transaction date in the fact. This preserves daily history while keeping the
 exercise's as-of date stable when the project is run later.
+
+#### Step 53b. Add the dimension and transaction projections
+
+**Goal:** expose the existing Silver star through explicit Gold column lists.
+
+**Reason and need:** Gold should stabilize consumer naming and fields, not
+duplicate historical attribution or silently inherit future upstream columns.
+
+**When and why used:** after configuration parses, add and inspect the six
+projections before introducing the new account/day fact.
 
 Create explicit `ref()` projections for the customer, account, debit-card,
 date, and time dimensions, plus the transaction fact:
@@ -3229,6 +4370,16 @@ Explicit column lists are intentional: they stabilize the reporting contract
 and prevent an upstream schema addition from silently changing the Gold
 interface. The transaction fact retains the Silver event-time keys. It does
 not invent a card key, because the transaction source contains no card ID.
+
+#### Step 53c. Add the account/day tier snapshot
+
+**Goal:** derive daily account state and its rolling 30-day spend classification.
+
+**Reason and need:** periodic tier comparison has a different grain from
+events; it requires end-of-day versions and an explicit rolling window.
+
+**When and why used:** after the Gold projections exist locally, add this
+fact for the tier-alignment report without changing transaction-grain measures.
 
 The account/day snapshot uses the account, customer, and active-card SCD2
 versions valid at the end of the snapshot day. Intervals remain half-open,
@@ -3266,13 +4417,23 @@ report filtering, but it does not prove upstream source completeness.
   the row-level fact. Define them as Power BI measures so filters and the
   selected snapshot date control aggregation.
 
+#### Step 53d. Add Gold tests before executing the consumer build
+
+**Goal:** test grain, relationships, classification, window sums, and dates.
+
+**Reason and need:** a successfully created snapshot can still duplicate
+accounts or misclassify tiers; SQL execution and data validation are separate gates.
+
+**When and why used:** after defining the fact, discover its tests locally;
+execute the build only after Landing, Bronze, and Silver pass live acceptance.
+
 **Quality checks:** YAML tests cover required/unique keys, dimension
 relationships, tier/status values, and fact grain. Singular tests check one
 row per account/date, the rolling-window sum, tier classification, and
 event-date SCD2 key alignment, and the configured snapshot end date. These
 tests are executable checks, not a substitute for a successful live build.
 
-**Local acceptance:** `dbt parse` and `dbt ls --select path:models/gold
+**Local acceptance:** `dbt parse` and `dbt ls --select path:models/030_Gold
 path:tests/gold` recognize the Gold resources. A live Gold compile/build is
 not acceptance yet: the upstream Landing contract and Silver relations must
 first be repaired and pass their gates. No Gold data has been published.
@@ -3287,29 +4448,46 @@ parse as proof of live data quality.
 **Goal:** ensure every Landing source table exists with the batch, load, and
 source-file metadata required by dbt snapshots, freshness checks, and lineage.
 
-**Why:** adding only the missing customer-address table would leave the other
+**Reason and need:** adding only the missing customer-address table would leave the other
 source tables without the `meta_batch_timestamp` required by the shared dbt
-source freshness configuration. The loader already defines all five source
-entities and attaches metadata; selecting entities explicitly lets the
+source freshness configuration. The loader attaches metadata; choosing each
+source and target explicitly lets the
 missing table and the existing four tables be refreshed in separate,
 controlled writes.
 
+**When and why used:** only when endpoint inspection reproduces the missing
+Landing contract from Iteration 52. Skip this repair for a complete fresh load;
+otherwise use one explicit batch for all invocations below before rerunning gates.
+
+Before Step 1, the goal is to create only the missing address relation. This
+isolates the repair from existing tables; use the source's exact file prefix
+so the loader selects the intended entity.
+
 **Step 1 — Load customer address only.** Run the loader with
-`p_entities=CustomerAdress`. The spelling follows the source CSV prefix; the
-destination is `dbo.ld_oys_customeraddress`. This creates the missing table
+`p_in_table_name=CustomerAdress`. The spelling follows the source CSV prefix;
+the derived target is `dbo.ld_oys_customeradress`. This creates the missing table
 without overwriting the other four Landing tables.
 
+Before Step 2, the goal is to align the four existing relations with the
+metadata contract. This is needed for freshness and observation timing; use
+the same explicit folder as Step 1 so a newer delivery cannot mix batches.
+
 **Step 2 — Add metadata to the other four tables.** Run the loader with
-`p_entities=Customer,Account,DebitCard,Transaction_Ledger`. The overwrite is
-limited to those four full-state/ledger Landing tables and uses the same latest
-batch. The customer-address table is not rewritten in this step.
+once for each of Customer, Account, DebitCard and Transaction_Ledger, with
+the corresponding `p_in_table_name` values from the config table below.
+Use the same explicit batch each time. The customer-address
+table is not rewritten in this step.
+
+Before Step 3, the goal is to prove the repair rather than infer it from
+notebook success. Check physical columns and batch aggregates now because
+the upstream dbt gate will read these exact relations next.
 
 **Step 3 — Verify the Landing contract.** Read the table catalog and bounded
 aggregates; confirm all five tables exist, all three metadata columns are
 present, and every table reports the same `meta_batch_timestamp`.
 
-**Observed acceptance result:** both loader runs completed. The read-only
-verification returned:
+**Historical acceptance result:** the earlier multi-entity loader completed
+both runs. The read-only verification returned the former address table name:
 
 | Landing table | Rows | Batch timestamp | Source files |
 |---|---:|---|---:|
@@ -3332,8 +4510,16 @@ Silver acceptance build be considered.
 **Goal:** prove that Landing and Bronze satisfy every assumption Silver relies
 on before any Silver model is written.
 
-**Why:** a green Silver build on top of incomplete Bronze would only move the
+**Reason and need:** a green Silver build on top of incomplete Bronze would only move the
 problem downstream. The `silver_upstream_checks` selector is the agreed gate.
+
+**When and why used:** after repairing a verified missing-input condition,
+create missing Bronze history from the validated complete batch, then rerun
+the full gate. Do not treat the historical missing-table errors as passes.
+
+Before Step 1, the goal is a read-only diagnosis of remaining failures. It is
+needed to distinguish unsafe data from absent relations; inspect the result
+before deciding whether the targeted snapshot creation in Step 2 applies.
 
 **Step 1 — Run the gate first, read-only.**
 
@@ -3345,6 +4531,10 @@ cd dbt_oyster_path
 All Landing source tests passed. Tests on the account and debit-card snapshots
 could not run because those snapshot tables did not exist yet: a missing
 relation, not a data defect.
+
+Before Step 2, the goal is to create the missing history and align all four
+observations. Proceed only when missing snapshot relations explain the gate
+failure and the Landing tests passed; afterwards rerun the gate before Silver.
 
 **Step 2 — Build all four snapshots from the same batch.**
 
@@ -3370,11 +4560,16 @@ the volume here makes the cost negligible.
 **Goal:** let events that happened before the first observation resolve to a
 dimension version, without hiding that this is an assumption.
 
-**Why:** every first version starts at the batch time (2026-11-17), but the
+**Reason and need:** every first version starts at the batch time (2026-11-17), but the
 transactions span 2026-10-09 to 2026-11-09. Under strict observation
 semantics (Iteration 49) every transaction would be `no_account_history`, and
 the Gold snapshot would carry no tier for any account. The sources contain no
 business effective date (for example an account opening date) to use instead.
+
+**When and why used:** after observing strict-policy attribution, choose the
+initial-load assumption explicitly before report acceptance. Develop the
+setting, shared expressions, and dimension projections in that order; rebuild
+dependent facts together and compare inferred flags with true observation times.
 
 **Decision point — how to treat time before the first observation:**
 
@@ -3384,6 +4579,10 @@ business effective date (for example an account opening date) to use instead.
 | B. Inferred initial history (chosen) | Each key's first version starts at `0001-01-01` and is flagged | Initial load of an existing system (Kimball initial-load practice) |
 | C. Rewrite the batch timestamp | Pretend the batch arrived earlier | Never: it falsifies lineage metadata |
 
+Before Change 1, the goal is to make inference a visible project choice,
+not an implicit SQL assumption. Add the setting when the policy is approved
+so developers can deliberately test strict and inferred behavior.
+
 **Change 1 — make the policy a project setting** in `dbt_project.yml`:
 
 ```yaml
@@ -3392,6 +4591,10 @@ vars:
   # back to 0001-01-01 and flag it with is_inferred_start.
   silver_infer_initial_history: true
 ```
+
+Before Change 2, the goal is to keep inferred boundaries and their flags
+consistent across dimensions. Define the shared expressions after the setting
+exists; both builders will consume them instead of copying policy branches.
 
 **Change 2 — define the policy once** in `macros/initial_history_policy.sql`.
 `version_group = 1` is the first observed version of a business key:
@@ -3416,6 +4619,10 @@ vars:
     {%- endif -%}
 {% endmacro %}
 ```
+
+Before Change 3, the goal is to expose assumed starts without changing
+observed-key identity. Apply the macros after they parse, retain observation
+time, then rebuild dimensions and facts so all lookups use the same policy.
 
 **Change 3 — apply it in both dimension builders**
 (`coalesce_observed_dimension` for account/card, and `s_dim_customer`):
@@ -3449,10 +4656,15 @@ Unknown members get `observed_valid_from = 0001-01-01` and
 **Goal:** bring the development transaction ledger onto the current Landing
 contract, including `meta_batch_timestamp`.
 
-**Why:** the ledger was created before Iteration 54 and is append-only with
+**Reason and need:** the ledger was created before Iteration 54 and is append-only with
 `full_refresh=false`. That protection is deliberate, but it also means dbt will
 not add the new column. All 4,840 existing ledger rows are present in Landing,
 so rebuilding loses no events.
+
+**When and why used:** only for this verified legacy development schema,
+after proving every stored event is recoverable from the chosen Landing input.
+Skip on a fresh current-schema ledger. Never generalize the recorded 4,840-row
+recovery condition to other runs or production; use a reviewed migration there.
 
 **Decision point — schema change on a protected append-only table:**
 
@@ -3498,9 +4710,16 @@ columns.
 **Goal:** build both layers and prove that the Gold result is correct, not only
 that the commands succeeded.
 
+**Reason and need:** model tests need live execution, and an independent
+recalculation can expose shared assumptions that a model-shaped test would miss.
+
+**When and why used:** after the upstream gate, history policy, and any
+applicable schema repair are accepted, build Silver before Gold and retain
+the reconciliation evidence used to define semantic-model acceptance numbers.
+
 ```powershell
 & '..\.venv\Scripts\dbt.exe' build --selector silver --threads 1 --target dev --profiles-dir .
-& '..\.venv\Scripts\dbt.exe' build --select path:models/gold path:tests/gold --threads 1 --target dev --profiles-dir .
+& '..\.venv\Scripts\dbt.exe' build --select path:models/030_Gold path:tests/gold --threads 1 --target dev --profiles-dir .
 ```
 
 `dbt build` runs each model's tests right after the model, so a failing
@@ -3568,10 +4787,14 @@ the Power BI semantic model on the Gold tables.
 **Goal:** `dbt build --profiles-dir .` must succeed without extra flags, so
 every developer and scheduler runs the same way.
 
-**Why:** with the original `threads: 4`, the full build (233 nodes) failed with
+**Reason and need:** with the original `threads: 4`, the full build (233 nodes) failed with
 deadlock victims on snapshots, Silver staging views, and Gold tables. Passing
 `--threads 1` by hand worked, but a safety setting that depends on remembering
 a flag is not a safety setting. Concurrency belongs in the profile.
+
+**When and why used:** after measuring the serial development build, put
+the tested setting in both profiles before wrapping the command in a notebook
+or pipeline. In this checkout it is already set; verify rather than resetting it.
 
 **Decision point — parallelism versus reliability:**
 
@@ -3603,15 +4826,32 @@ the report described at the end of the exercise document.
 creating anything, so the report reproduces verifiable numbers for the
 2026-11-09 as-of date.
 
-**Why:** the exercise document's final chapter (Semantic Model & Power BI
+**Reason and need:** the exercise document's final chapter (Semantic Model & Power BI
 Report Creation) targets a differently named table set and quotes example
 figures (37.0%, "27 Platinum vs 10 Gold") from another dataset. Mapping it to
 our Gold contract first prevents wrong relationships and, above all, wrong
 aggregation of a snapshot fact.
 
+**When and why used:** after Gold reconciliation, use the sequence below as
+a design-to-implementation exercise. Validate DAX against the tested as-of
+data before adding visuals; model/report creation is not claimed by this guide.
+
 **Status:** design only. No semantic model, measure, or report exists yet.
 
 #### Build sequence
+
+Read the context for each proposed step before performing its matching row
+in the action table. Complete and check one model responsibility at a time.
+
+| Step | Goal | Reason and need | When and why used |
+|---|---|---|---|
+| 1 | Create the intended Direct Lake model | A verified Gold source and explicit model identity prevent accidental binding to another environment | After Gold acceptance, establish the model that owns reporting semantics |
+| 2 | Add only the mapped tables and friendly names | Consumers need a recognizable contract, not every Warehouse object | Before relationships, inspect source columns and key types |
+| 3 | Add single-direction relationships and mark Date | Correct cardinality and filter paths prevent duplicated or ambiguous aggregation | Once tables exist, validate keys and date filtering before measures |
+| 4 | Hide technical fields and apply formats | Surrogate keys and raw lineage should not become accidental report groupings | Before report authoring, keep business fields and inference indicators usable |
+| 5 | Create and query the measures | Rolling daily snapshots are semi-additive and require an explicit as-of date | After relationships, verify KPI totals and filtered segments before any visual |
+| 6 | Build and reconcile visuals | A correct measure can still be misused by a legend, slicer, or visual field assignment | After DAX checks pass, test the full report against the listed expected results |
+| 7 | Decide and test security separately | Missing source security fields cannot be invented, and Direct Lake mode affects the security design | Before sharing beyond the approved audience, obtain requirements and test access |
 
 | # | Step | Where |
 |---|---|---|
@@ -3809,9 +5049,13 @@ logic is written inside the pipeline.
 **Goal:** decide, before creating any item, what each document step becomes
 in Fabric and under which identity dbt runs.
 
-**Why:** the document uses a Databricks notebook, a Copy Data activity and
+**Reason and need:** the document uses a Databricks notebook, a Copy Data activity and
 "Publish All". Copying it literally would bypass the loader's validation and
 `meta_*` columns, and would leave the dbt identity undefined.
+
+**When and why used:** after the manual full build passes, choose the runner,
+identity, and secret mechanism before creating the DW child. Raw and Landing
+children should already be accepted from E8-E10 and L1-L2; reuse them.
 
 | Document | Fabric implementation | Reason |
 |---|---|---|
@@ -3934,13 +5178,17 @@ identity are recorded.
 **Goal:** make the batch the loader reads explicit and controllable, without
 coupling the generator to the pipeline.
 
-**Why:** the generator only writes files into a new `yyyyMMddHHmmss` folder;
+**Reason and need:** the generator only writes files into a new `yyyyMMddHHmmss` folder;
 it returns nothing to its caller, just as a real source system would not. The
 loader therefore decides which batch to read:
 
 - `p_batch_folder` set: load exactly that folder (reload or replay);
 - `p_batch_folder` empty: load the latest folder. Folder names are UTC
   timestamps, so the lexicographic maximum is the most recent batch.
+
+**When and why used:** implement and test this input contract during L1-L2.
+At this later orchestration checkpoint, verify the saved parameter marker
+and selected batch before the master depends on the Landing child.
 
 The loader's parameter cell was marked `# CELL` in the source file, not
 `# PARAMETERS CELL`. Fabric therefore did not treat it as a parameter cell,
@@ -3954,8 +5202,8 @@ and a pipeline override of `p_batch_folder` would have been silently ignored.
 # Parameters (pipelines override these; in the Fabric UI this shows as the "Parameters" cell).
 p_root_path = "Files/landing/oyster"
 p_batch_folder = ""   # "" = latest batch folder (yyyyMMddHHmmss names sort chronologically); or e.g. "20261117080003" to reload a specific batch
-p_entities = ""       # "" = all entities; or comma-separated, e.g. "Customer,Account"
-p_debug = 0           # 1 = display a preview of each loaded table
+p_in_table_name = ""  # CSV file prefix, e.g. "Customer"
+p_debug = 0           # 1 = display a preview of the loaded table
 ```
 
 The existing selection logic stays unchanged:
@@ -4023,6 +5271,13 @@ folder, and with an unknown folder fails before writing anything.
 **Goal:** replace the single `pl_master_orchestration` sketched in O1 with one
 pipeline per layer, plus a master that only chains them:
 
+**Reason and need:** independently tested layer children support targeted
+reruns, while a success-only master prevents downstream work on a failed load.
+
+**When and why used:** use the Landing definitions during L2; create the
+master here only after raw and Landing children pass independently. Add the
+DW invocation only after O4's runner and child have passed their own test.
+
 ```text
 pl_Master_Core
   Generate Data  --on success-->  Load Delta  --on success-->  DW create and test
@@ -4061,15 +5316,44 @@ Transaction_Ledger,1,1,csv
 
 `CustomerAdress` keeps the source's spelling, because it is the file prefix.
 A Lookup returns every CSV value as a string, so the pipeline compares with
-`'1'`, not `1`.
+`'1'`, not `1`. The CSV loader derives the target as
+`dbo.ld_oys_<lowercase source_object_name>`, including
+`CustomerAdress` -> `dbo.ld_oys_customeradress`. It does not validate business
+keys or required columns. The old `dbo.ld_oys_customeraddress` table is not
+renamed or deleted; load the new table before running dbt against it.
 
 #### Step 1: `pl_Landing_Raw_Core`
+
+**Goal:** reuse the saved generator in an independently runnable raw child.
+
+**Reason and need:** generation must be testable without loading or building
+data, and its change-simulation input must not be hidden in notebook defaults.
+
+**When and why used:** create this responsibility in E8-E10, then verify or
+adapt the existing child here; do not create a duplicate just to match its name.
 
 A single notebook activity that runs `nb_generate_deterministic_sample_data`.
 The pipeline parameter `p_simulate_changes` (int, default `0`) is passed to
 the notebook parameter of the same name.
 
+**Raw child expression:** in the generator Notebook activity's Base
+parameters, set `p_simulate_changes` to type **Int** and dynamic value
+`@pipeline().parameters.p_simulate_changes`. It passes `0` for the baseline
+or `1` for the controlled changes; the expression passes the value without
+converting it to text. This mapping is present in the
+[raw pipeline definition](../../fabric-artifacts/pipelines/pl_jb_landing_raw.DataPipeline/pipeline-content.json).
+The optional `customer_count` to `CUSTOMER_COUNT` mapping in E9 is a separate
+teaching improvement, not a parameter already exposed by this export.
+
 #### Step 2: `pl_Landing_Delta_Core`
+
+**Goal:** resolve one delivery and load enabled entities through tested routing.
+
+**Reason and need:** configuration controls the load inventory, while a shared
+resolver prevents separate entity calls from selecting different latest folders.
+
+**When and why used:** develop the activities incrementally in L1-L2; the
+definitions and snippets below are their detailed reference and master prerequisite.
 
 ```text
 Set v_load_date
@@ -4078,8 +5362,8 @@ Set v_load_date
  -> Filter - active tables (is_active = '1' and is_active_delta = '1')
  -> forEach_FileLoader (sequential)
       sw_FileType on toLower(trim(item().type))
-        csv     -> nb_csv_load_source_to_ld (p_batch_folder, p_entities = item().source_object_name)
-        json    -> nb_json_load_source_to_ld (p_batch_folder)
+        csv     -> nb_csv_load_source_to_ld (p_batch_folder, p_in_table_name = item().source_object_name)
+        json    -> nb_json_load_source_to_ld (p_batch_folder, p_root_path, p_in_table_name = item().source_object_name)
         default -> Fail: UNSUPPORTED_SOURCE_TYPE
 ```
 
@@ -4110,7 +5394,9 @@ Run the resolver and pipeline-wiring tests locally from the repository root
 python -B -m unittest discover -s .\fabric-artifacts\tests -p test_landing_batch.py -v
 ```
 
-The key expressions:
+The key expressions (the complete field-by-field mapping, including Filter,
+ForEach, Switch, and Fail, is in the
+[Landing expression reference](#landing-pipeline-expression-reference)):
 
 ```text
 v_load_date        @convertFromUtc(utcNow(), 'Central Europe Standard Time', 'yyyy-MM-dd HH:mm:ss')
@@ -4152,13 +5438,30 @@ The csv branch, the notebook activity inside the ForEach:
     "parameters": {
       "p_root_path":    { "value": { "value": "@concat('Files/', pipeline().parameters.p_root_folder)", "type": "Expression" }, "type": "string" },
       "p_batch_folder": { "value": { "value": "@activity('nb_resolve_landing_batch').output.result.exitValue", "type": "Expression" }, "type": "string" },
-      "p_entities":     { "value": { "value": "@item().source_object_name", "type": "Expression" }, "type": "string" }
+      "p_in_table_name": { "value": { "value": "@item().source_object_name", "type": "Expression" }, "type": "string" }
     }
   }
 }
 ```
 
 #### Step 3: `pl_Master_Core`
+
+**Goal:** create a control-only master from independently accepted children.
+
+**Reason and need:** success dependencies and completion waits ensure that
+the next layer never treats a submitted or failed child as completed input.
+
+**When and why used:** after raw and Landing acceptance, create the first two
+calls and test their chain; extend it with the DW child only after O4 passes.
+
+1. Create or open the intended master Data pipeline and verify its item identity.
+2. Add `Generate Data` as Execute Pipeline, select the accepted raw child,
+  map `p_simulate_changes`, and enable `waitOnCompletion`.
+3. Add `Load Delta` referencing the accepted Landing child, with an on-success
+  dependency on generation and `waitOnCompletion`. Map the normal-run empty
+  batch input; serialize producers while relying on latest-batch selection.
+4. Save and test the two-child chain. Verify the delivery and all Landing
+  tables before adding the DW child in O4.
 
 Three child activities are chained on success: `Generate Data`, `Load Delta`,
 and `DW create and test`. The first two are Execute Pipeline activities (shown
@@ -4169,12 +5472,49 @@ normal run loads the batch that was just generated. The DW child receives the
 secure `p_ado_token` parameter. A semantic-model refresh is a planned
 follow-up after the DW child succeeds.
 
+**Master inputs: distinguish expressions from literals.** The preceding
+flow describes the historical tutorial run. The current checked-in
+[master definition](../../fabric-artifacts/pipelines/e316df99-b1e8-b45a-430b-9968433f6858.DataPipeline/pipeline-content.json)
+uses `InvokePipeline` activities and contains the following child inputs:
+
+| Master activity | Child parameter | Current exported value | Interpretation |
+|---|---|---|---|
+| `Generate Data` | `p_simulate_changes` | `0` | Literal integer; it does not currently read the master's parameter |
+| `Load Delta` | `p_batch_folder` | Empty string | Literal string; the child resolver selects latest |
+| `Load Delta` | `p_root_folder` | `landing/oyster` | Literal Files-relative root |
+| `DW create ans test` | `p_ado_token` | `@pipeline().parameters.p_ado_token` | Dynamic credential mapping from the master's SecureString input |
+| `DW create ans test` | `p_branch` | `main` | Literal branch name |
+| `DW create ans test` | `p_dbt_target` | `dev` | Literal dbt target |
+| `DW create ans test` | `p_dbt_command` | `build` | Literal command |
+| `DW create ans test` | `p_dbt_args` | Empty string | Literal extra arguments |
+
+To make the master's `p_simulate_changes` input effective as described in
+the tutorial, change the `Generate Data` child parameter from literal `0`
+to dynamic expression `@pipeline().parameters.p_simulate_changes` in your
+learning pipeline, then verify the resolved value. This is a documented
+wiring change, not a change applied to the repository pipeline here.
+
+The export spells the DW activity `DW create ans test`; its semantic-refresh
+dependency uses that exact name. It also includes `Refresh semantic model`
+and marks `Generate Data` inactive with `onInactiveMarkAs: Succeeded`.
+These differ from the recorded O3/O4 run: verify activity state, destination,
+and connection before treating the export as an end-to-end generation test.
+Success dependencies (`Succeeded`) and `waitOnCompletion: true` are settings,
+not dynamic expressions. The refresh's model and connection IDs are also
+literal bindings; there is no refresh expression to paste into the editor.
+
+Keep `p_ado_token` a SecureString at both pipeline boundaries and mark
+credential-bearing activity input secure. The DW child's notebook already
+has `secureInput: true`; the exported master's DW invocation currently has
+`secureInput: false`, so enable it before supplying a real credential. Never
+replace the parameter expression with an actual token in the definition.
+
 #### Decision points
 
 | Decision | Options | Choice and reason |
 |---|---|---|
 | Pipeline layout | One master with all activities, or one pipeline per layer with a master | **Per layer:** layers can be rerun alone; failures are localised |
-| Loader in the ForEach | Reuse `nb_csv_load_source_to_ld` with `p_entities`, or write a new per-table notebook | **Reuse:** one tested code base, same validation and `meta_*` columns |
+| Loader in the ForEach | Reuse `nb_csv_load_source_to_ld` with the source name, or write a new per-table notebook | **Reuse:** one code base and the same `meta_*` columns |
 | Who picks "latest" | Each loader call on its own, or once in the pipeline | **Once in the pipeline:** every entity gets the same folder, even if a new folder appears during the run |
 | How "latest" is found | A small notebook, or Get Metadata + ForEach + If | **One resolver notebook:** replaces the native activity chain and returns one batch to both loader branches; requires a Spark session |
 | ForEach mode | Sequential or parallel (`batchCount`) | **Sequential:** predictable, one Spark session at a time; parallel is a later optimisation |
@@ -4193,9 +5533,8 @@ the legacy activity remains a supported fit for this design. See Microsoft's
 [Invoke pipeline activity documentation](https://learn.microsoft.com/en-us/fabric/data-factory/invoke-pipeline-activity)
 for current capabilities.
 
-**Trade-off of per-entity loader calls:** called with all entities, the loader
-validates every file before writing any table. Called per entity, an error in
-the fourth entity leaves the first three tables already on the new batch. This
+**Trade-off of per-entity loader calls:** an error in
+the fourth entity can leave earlier tables already on the new batch. This
 is acceptable because every iteration gets the same batch folder, so one rerun
 of `pl_Landing_Delta_Core` (with the same `p_batch_folder` if needed) restores
 a consistent state, and the dbt step only starts when the whole Landing
@@ -4232,8 +5571,7 @@ Two observations follow from the per-entity design:
 - Each notebook activity starts its own Spark session, about 3.5 minutes per
   entity, so the Landing step takes about 18 minutes for five small files.
   Options for later: run the ForEach in parallel (`batchCount`), enable
-  high-concurrency sessions for pipelines with a shared session tag, or call
-  the loader once with all active entities as a comma-separated `p_entities`.
+  high-concurrency sessions for pipelines with a shared session tag.
 
 **Acceptance check:** each layer pipeline runs on its own and from the master;
 all Landing tables carry the same, newest `meta_batch_timestamp`; a config row
@@ -4245,10 +5583,74 @@ with an unknown `type` fails the run.
 the developer's identity, and verify both the dbt results and the persisted
 run artefacts.
 
-**Why:** the Landing pipeline and dbt build have separate responsibilities.
+**Reason and need:** the Landing pipeline and dbt build have separate responsibilities.
 Keeping dbt in its own pipeline makes it independently runnable and lets the
 master wait for a successful Warehouse build before a later semantic-model
 refresh.
+
+**When and why used:** after the full manual build and O1 identity decisions,
+create and test the dbt notebook, then its child, then the master invocation.
+This is the point where the previously developed SQL transformations become
+an operational Warehouse step, not a new transformation implementation.
+
+#### Step O4a. Save and test the dbt runner notebook
+
+**Goal:** make `nb_run_dbt` a saved runner with observable outputs and failures.
+
+**Reason and need:** the child needs an executable item that installs pinned
+tools, retrieves the project, refreshes endpoint metadata, and propagates dbt failure.
+
+**When and why used:** before creating the DW activity, import or verify the
+existing notebook and its parameters. Use the intended development resources
+and approved credential entry path; never put a token into exported source.
+
+Verify its configuration against O1, run it against the accepted development
+input, and inspect the recorded commit, identity, target, and dbt results.
+Only a successful intended build is acceptance for wrapping it in a child.
+
+#### Step O4b. Create and accept the DW child pipeline
+
+**Goal:** expose the tested runner as an independently runnable DW layer.
+
+**Reason and need:** failures should permit a DW-only rerun without regenerating
+or reloading raw data; the pipeline must fail when the notebook reports failure.
+
+**When and why used:** after O4a passes, create or open the intended DW pipeline
+(`pl_jb_create_dw` in the repository; `pl_Create_DW_Core` in the recorded run).
+Add one Notebook activity referencing `nb_run_dbt`, expose the parameters below,
+map their names exactly, mark credential-bearing input secure, and keep retries
+at zero. Save, run manually, and inspect persisted artifacts before master wiring.
+
+**DW child expressions:** in `nb_run_dbt` **Settings > Base parameters**, use
+the exact dynamic mappings below from the
+[DW pipeline definition](../../fabric-artifacts/pipelines/pl_jb_create_dw.DataPipeline/pipeline-content.json).
+The right-hand side reads the child pipeline's inputs, not the master's
+inputs directly; the master must first pass its values into the child.
+
+| Notebook base parameter | Notebook parameter type | Exact expression | Child pipeline input/default |
+|---|---|---|---|
+| `p_ado_token` | String | `@pipeline().parameters.p_ado_token` | SecureString input supplied securely at execution time |
+| `p_branch` | String | `@pipeline().parameters.p_branch` | String, `main` |
+| `p_dbt_target` | String | `@pipeline().parameters.p_dbt_target` | String, `dev` |
+| `p_dbt_command` | String | `@pipeline().parameters.p_dbt_command` | String, `build` |
+| `p_dbt_args` | String | `@pipeline().parameters.p_dbt_args` | String, empty default |
+
+The notebook parameter type for the token is String in the export; secrecy
+depends on SecureString pipeline inputs and the activity's secure-input
+policy, not on inventing a SecureString notebook base-parameter type.
+Verify non-secret resolved inputs in monitoring and the persisted run
+artifacts; never print or reveal the resolved token while checking mappings.
+
+#### Step O4c. Add the accepted DW child to the master
+
+**Goal:** run Warehouse creation and tests only after complete Landing success.
+
+**Reason and need:** a successful load is not a successful model build; the
+master must await the DW child's outcome before any later reporting refresh.
+
+**When and why used:** after O4b passes, add `DW create and test` to the master
+with an on-success dependency on `Load Delta`, wait for completion, and pass
+the secure credential input. Test the three-child chain and retain its run evidence.
 
 **Implemented flow:**
 
@@ -4337,6 +5739,10 @@ validates code; Fabric Git integration syncs definitions into Development;
 Fabric deployment pipelines promote approved items to other workspaces.
 None of those actions is the same as running a Fabric data pipeline.
 
+For the one-time export from a populated workspace to an empty branch, see
+[After L1](#after-l1-export-the-landing-delta-pipeline-to-an-empty-azure-repos-branch).
+The workflow below starts from the approved `main` branch instead.
+
 ```text
 main -> feature/* -> PR to main (review + CI) -> squash merge
      -> Fabric Development: Update from Git -> deploy to Test/UAT
@@ -4344,6 +5750,14 @@ main -> feature/* -> PR to main (review + CI) -> squash merge
 ```
 
 ### 1. Create a short-lived feature branch and make a focused change
+
+**Goal:** isolate one reviewable change from the approved main branch.
+
+**Reason and need:** source and Fabric definitions need a traceable diff;
+shared-workspace edits or generated files can otherwise obscure ownership.
+
+**When and why used:** before modifying an established project, use a feature
+branch; after tutorial acceptance, apply this workflow to every subsequent change.
 
 | What to click | Expected result | Why |
 |---|---|---|
@@ -4358,7 +5772,23 @@ workspace.
 
 ### 2. Protect `main` and add automatic PR validation
 
+**Goal:** enforce independent review and an unprivileged parsing gate.
+
+**Reason and need:** local habits cannot prevent direct pushes or stale
+validation; server policies must protect the branch used for deployment.
+
+**When and why used:** during team-workflow bootstrap, test the CI job before
+making it required and keep write-capable deployment credentials out of PR checks.
+
 #### Protect `main` against direct pushes
+
+**Goal:** require reviewed PR completion without contributor bypass permissions.
+
+**Reason and need:** a policy is ineffective for identities that can bypass
+it; branch protection must still allow contributors to complete approved PRs.
+
+**When and why used:** before adopting `main` as the release source, configure
+and verify permissions for developers, CI, and Fabric authoring identities.
 
 In the [Oyster Azure Repos repository](https://dev.azure.com/pulze-azure-devops/Oyster/_git/Oyster),
 use a Project Administrator account or an account with **Edit policies**.
@@ -4380,6 +5810,14 @@ use **Update from Git** after the merge.
 See [Azure Repos branch permissions](https://learn.microsoft.com/en-us/azure/devops/repos/git/branch-permissions?view=azure-devops).
 
 #### Bootstrap the automatic PR check
+
+**Goal:** create, run, and register the dbt parse job as required validation.
+
+**Reason and need:** a build policy needs an existing usable pipeline;
+unprivileged parsing catches project errors without granting Warehouse writes.
+
+**When and why used:** on a setup branch after review policy configuration,
+prove success and deliberate failure before relying on automatic merge blocking.
 
 On a setup branch, add `azure-pipelines-ci.yml` at the Oyster repository root.
 Use **Repos > Files** to check that the YAML is on the intended branch.
@@ -4421,6 +5859,14 @@ unprivileged job separate from jobs that can write to Fabric.
 
 ### 3. Open, review and merge the pull request
 
+**Goal:** produce an independently approved and CI-validated release candidate.
+
+**Reason and need:** approval must cover the current diff and passing merge
+validation; the resulting commit identifies exactly what may be promoted.
+
+**When and why used:** after focused edits and local checks, open the PR,
+resolve review feedback, and record the merged SHA before workspace synchronization.
+
 1. **Click:** **Repos > Pull requests > New pull request**. Verify source
    `feature/...` (or `fix/...`) and target `main`. Add a reviewer, link the work
    item if applicable, and select **Create**.
@@ -4439,6 +5885,14 @@ unprivileged job separate from jobs that can write to Fabric.
    revision, not just a branch name that can move.
 
 ### 4. Sync Development, then deploy and test in UAT
+
+**Goal:** sync the approved candidate and validate its stage-specific bindings.
+
+**Reason and need:** Git merge and definition deployment do not run data
+builds or guarantee correct destination IDs, credentials, and sources.
+
+**When and why used:** after recording the approved SHA, promote to an isolated
+Test workspace and run data/report smoke checks before requesting production approval.
 
 | What to click | Expected result | Why |
 |---|---|---|
@@ -4462,6 +5916,14 @@ unchanged in Production**. Set up the approved production ingestion path
 and keep deployment credentials out of Git and PR-variable contexts.
 
 ### 5. Approve Production, verify the release, and automate in stages
+
+**Goal:** promote only the UAT-tested version and verify production outcomes.
+
+**Reason and need:** approval must refer to immutable evidence; definition
+rollback cannot undo table writes, and manual deployment paths need separate controls.
+
+**When and why used:** only after UAT and production bindings are approved,
+release through the governed path; automate it after manual recovery and checks work.
 
 1. **Click:** in the Fabric deployment pipeline, open **Test** and its
    deployment history. Review the UAT run and record release SHA, run ID,
@@ -4523,6 +5985,23 @@ and [Azure Pipelines approvals and checks](https://learn.microsoft.com/en-us/azu
 
 These are real next decisions, not guarantees supplied by the existing tests.
 
+## Tutorial completion check
+
+Finish the implemented development path only when the raw and Landing
+children pass independently, the selected Landing batch is consistent,
+Bronze repeat/change checks have the intended effects, Silver and Gold gates
+pass, independent reconciliation agrees, and the DW child and master record
+the expected commit, target, identity, and results. Keep your own run evidence;
+the historical results in this guide do not verify your environment.
+
+The reporting and CI/CD sections define the remaining acceptance route:
+create and query the semantic model before report visuals, then test review,
+deployment bindings, and approvals before enabling production. Add semantic
+refresh after successful DW completion only when the target model exists and
+its refresh has been tested independently. Do not mark planned features,
+security, scheduling, or production rollout complete merely because the
+development data pipeline is green.
+
 ## Troubleshooting encountered during development
 
 | Symptom | Interpretation/action |
@@ -4543,17 +6022,17 @@ These are real next decisions, not guarantees supplied by the existing tests.
 - [Project defaults](../dbt_project.yml)
 - [Dev/prod profiles](../profiles.yml)
 - [Schema naming macro](../macros/generate_schema_name.sql)
-- [Landing sources, column documentation, key tests, freshness](../models/landing/_landing__sources.yml)
+- [Landing sources, column documentation, key tests, freshness](../models/000_Source/_landing__sources.yml)
 - [Generator notebook](../../fabric-artifacts/notebooks/nb_generate_deterministic_sample_data.Notebook/notebook-content.py)
 - [Loader notebook](../../fabric-artifacts/notebooks/nb_csv_load_source_to_ld.Notebook/notebook-content.py)
 - [Four snapshots and their column tests](../snapshots/bronze/_bronze__snapshots.yml)
-- [Incremental ledger](../models/bronze/b_oys_transaction_ledger.sql)
-- [Ledger column tests and operational description](../models/bronze/_bronze__models.yml)
+- [Incremental ledger](../models/010_Bronze/b_oys_transaction_ledger.sql)
+- [Ledger column tests and operational description](../models/010_Bronze/_bronze__models.yml)
 - [Landing batch test](../tests/landing/assert_landing_single_batch.sql)
 - [Current snapshot version test](../tests/bronze/assert_bronze_current_keys_unique.sql)
 - [Transaction immutability test](../tests/bronze/assert_transaction_events_immutable.sql)
-- [Gold dimensions, facts, and snapshot tests](../models/gold/)
-- [Gold account-tier snapshot model](../models/gold/g_fct_account_tier_daily_snapshot.sql)
+- [Gold dimensions, facts, and snapshot tests](../models/030_Gold/)
+- [Gold account-tier snapshot model](../models/030_Gold/g_fct_account_tier_daily_snapshot.sql)
 - [Gold account-tier snapshot tests](../tests/gold/)
 - [Gold snapshot end-date test](../tests/gold/assert_gold_snapshot_end_date.sql)
 - [Initial-load history policy macros](../macros/initial_history_policy.sql)

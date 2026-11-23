@@ -1,5 +1,3 @@
-{{ config(materialized='view') }}
-
 {% set address_types = [
     ('permanent', 'Permanent'),
     ('mailing', 'Mailing'),

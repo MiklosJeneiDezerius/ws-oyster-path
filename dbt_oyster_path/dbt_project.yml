@@ -44,12 +44,13 @@ models:
     # Config indicated by + and applies to all files under models/example/
     example:
       +materialized: view
-    silver:
+    015_BIS:
       +schema: silver
       +materialized: table
-      staging:
-        +materialized: view
-    gold:
+    020_Silver:
+      +schema: silver
+      +materialized: table
+    030_Gold:
       +schema: gold
       +materialized: table
 

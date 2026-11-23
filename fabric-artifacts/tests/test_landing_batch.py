@@ -98,8 +98,10 @@ class LandingBatchTests(unittest.TestCase):
                 "value": {"value": "@activity('nb_resolve_landing_batch').output.result.exitValue", "type": "Expression"},
                 "type": "string",
             })
-            if case["value"] == "csv":
-                self.assertEqual(parameters["p_root_path"], resolver["typeProperties"]["parameters"]["p_root_path"])
+            self.assertEqual(parameters["p_root_path"], resolver["typeProperties"]["parameters"]["p_root_path"])
+            self.assertEqual(parameters["p_in_table_name"]["value"]["value"], "@item().source_object_name")
+            self.assertNotIn("p_target_table", parameters)
+            self.assertNotIn("p_entities", parameters)
         self.assertNotIn("v_batch_folder", properties["variables"])
         self.assertIn("# PARAMETERS CELL ********************", SOURCE)
         compile(SOURCE, str(RESOLVER / "notebook-content.py"), "exec")

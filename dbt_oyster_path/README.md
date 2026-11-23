@@ -20,9 +20,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Silver build or validation failed; do not publ
 ```
 
 These [selectors](selectors.yml) do not run the loader, append Bronze events,
-or execute snapshots. They validate the existing history and rebuild all Silver
-models, including the independent card dimension. A passing run is required
-before reporting publication; this is not an atomic publication mechanism.
+or execute snapshots. They validate the existing history and rebuild all BIS
+and Silver models, including the independent card dimension. BIS models are
+tables and must be rebuilt after Bronze changes before downstream models or
+tests can use fresh data. The view-to-table change has not yet been validated
+in Fabric; approve and verify the conversion before publishing. A passing run
+is required before reporting publication; this is not an atomic publication
+mechanism.
 See iteration 51 of the [walkthrough](docs/bronze-development-walkthrough.md)
 for selection previews, acceptance criteria, and historical test scenarios.
 

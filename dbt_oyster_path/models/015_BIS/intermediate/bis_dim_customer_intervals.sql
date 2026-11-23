@@ -1,5 +1,3 @@
-{{ config(materialized='view') }}
-
 with boundaries as (
     select customer_id, observed_valid_from as boundary_at
     from {{ ref('bis_dim_customer_staging') }}

@@ -6,7 +6,7 @@ models:
       Candidate half-open customer observation intervals split at every customer
       and address history boundary. Includes customer tombstone coverage but
       excludes periods with no observed customer version. Not final SCD2 versions.
-      Run staging history and address ambiguity tests before using this view.
+      Run staging history and address ambiguity tests before using this table.
     columns:
       - name: customer_id
         description: Normalized customer business key.

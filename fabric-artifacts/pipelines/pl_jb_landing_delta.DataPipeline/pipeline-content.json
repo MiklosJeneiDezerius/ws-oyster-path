@@ -181,7 +181,7 @@
                               },
                               "type": "string"
                             },
-                            "p_entities": {
+                            "p_in_table_name": {
                               "value": {
                                 "value": "@item().source_object_name",
                                 "type": "Expression"
@@ -212,9 +212,23 @@
                           "notebookId": "d7cffd77-c81a-aba4-487b-1656b3a1ed2b",
                           "workspaceId": "00000000-0000-0000-0000-000000000000",
                           "parameters": {
+                            "p_root_path": {
+                              "value": {
+                                "value": "@concat('Files/', pipeline().parameters.p_root_folder)",
+                                "type": "Expression"
+                              },
+                              "type": "string"
+                            },
                             "p_batch_folder": {
                               "value": {
                                 "value": "@activity('nb_resolve_landing_batch').output.result.exitValue",
+                                "type": "Expression"
+                              },
+                              "type": "string"
+                            },
+                            "p_in_table_name": {
+                              "value": {
+                                "value": "@item().source_object_name",
                                 "type": "Expression"
                               },
                               "type": "string"

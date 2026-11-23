@@ -7,9 +7,9 @@ selectors:
           value: test
         - union:
             - method: path
-              value: models/landing
+              value: models/000_Source
             - method: path
-              value: models/bronze
+              value: models/010_Bronze
             - method: path
               value: snapshots/bronze
             - method: path
@@ -18,10 +18,12 @@ selectors:
               value: tests/bronze
 
   - name: silver
-    description: Build all Silver models and run their generic and shared singular tests, without rebuilding Bronze.
+    description: Build BIS and Silver models and run their generic and shared singular tests, without rebuilding Bronze.
     definition:
       union:
         - method: path
-          value: models/silver
+          value: models/015_BIS
+        - method: path
+          value: models/020_Silver
         - method: path
           value: tests/silver

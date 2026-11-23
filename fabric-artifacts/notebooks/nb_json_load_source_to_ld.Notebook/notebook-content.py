@@ -30,7 +30,7 @@
 # Parameters (pipelines override these; in the Fabric UI this shows as the "Parameters" cell).
 p_root_path = "Files/landing/oyster"
 p_batch_folder = ""   # "" = latest batch folder (yyyyMMddHHmmss names sort chronologically); or e.g. "20261118072024"
-p_target_table = "dbo.ld_oys_transaction_ledger_json"   # set to dbo.ld_oys_transaction_ledger to replace the CSV path
+p_in_table_name = ""  # JSON file prefix; currently only "Transaction_Ledger" is supported
 p_debug = 0           # 1 = display a preview of the loaded table
 
 # METADATA ********************
@@ -47,6 +47,7 @@ p_debug = 0           # 1 = display a preview of the loaded table
 # transactions split into arrays of 20 (`Data.TransactionBatches`, an array of arrays).
 # `flatten()` merges the inner arrays into one array per account and `explode()` emits one row per
 # transaction. The result has the same columns as the CSV-loaded `ld_oys_transaction_ledger`.
+# The target is derived from the source name, as in the CSV loader, and is overwritten.
 
 # CELL ********************
 
@@ -58,7 +59,12 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import ArrayType, StringType, StructField, StructType
 
 REQUIRED_COLUMNS = ["TransactionID", "AccountID", "Amount", "Timestamp"]
-FILE_PREFIX = "Transaction_Ledger"
+file_prefix = p_in_table_name.strip()
+if not re.fullmatch(r"[A-Za-z0-9_]+", file_prefix):
+    raise ValueError("p_in_table_name must be a non-empty JSON file prefix containing only letters, digits and underscores")
+if file_prefix != "Transaction_Ledger":
+    raise ValueError(f"{file_prefix}: only Transaction_Ledger JSON is supported")
+table_name = f"dbo.ld_oys_{file_prefix.lower()}"
 
 # Batch folders are named yyyyMMddHHmmss (UTC) by the generator; 14-digit names sort chronologically
 batch_folders = [
@@ -74,7 +80,7 @@ batch_folder = p_batch_folder or max(batch_folders)
 
 batch_ts = datetime.strptime(batch_folder, "%Y%m%d%H%M%S")    # when the source extracted the data
 load_ts = datetime.now(timezone.utc).replace(tzinfo=None)
-print(f"Batch {batch_folder} (of {len(batch_folders)}) | target: {p_target_table} | load_ts (UTC): {load_ts}")
+print(f"Batch {batch_folder} (of {len(batch_folders)}) | source: {file_prefix} | target: {table_name} | load_ts (UTC): {load_ts}")
 
 # METADATA ********************
 
@@ -97,7 +103,7 @@ document_schema = StructType([
     ])),
 ])
 
-path = f"{p_root_path}/{batch_folder}/{FILE_PREFIX}_*.json"
+path = f"{p_root_path}/{batch_folder}/{file_prefix}_*.json"
 documents = (
     spark.read.schema(document_schema)
     .option("mode", "FAILFAST")        # a malformed JSON line fails the run instead of becoming a null row
@@ -105,7 +111,7 @@ documents = (
     .select("*", F.col("_metadata.file_name").alias("meta_source_file"))
 )
 if not documents.take(1):
-    raise ValueError(f"{FILE_PREFIX}: no JSON documents in {path}")
+    raise ValueError(f"{file_prefix}: no JSON documents in {path}")
 
 # 1) Envelope validation: every document must carry an account and at least one non-empty batch
 bad_envelopes = documents.filter(
@@ -115,7 +121,7 @@ bad_envelopes = documents.filter(
     | F.exists("Data.TransactionBatches", lambda b: b.isNull() | (F.size(b) == 0))
 ).count()
 if bad_envelopes:
-    raise ValueError(f"{FILE_PREFIX}: {bad_envelopes} document(s) without AccountID or with empty batches in {path}")
+    raise ValueError(f"{file_prefix}: {bad_envelopes} document(s) without AccountID or with empty batches in {path}")
 
 # 2) flatten: array<array<struct>> -> array<struct>; explode: one row per transaction
 transactions = (
@@ -133,15 +139,15 @@ missing = transactions.filter(
     reduce(or_, [F.col(c).isNull() | (F.trim(F.col(c)) == "") for c in REQUIRED_COLUMNS])
 ).count()
 if missing:
-    raise ValueError(f"{FILE_PREFIX}: {missing} transaction(s) with an empty required field in {path}")
+    raise ValueError(f"{file_prefix}: {missing} transaction(s) with an empty required field in {path}")
 
 foreign = transactions.filter(F.col("AccountID") != F.col("envelope_account_id")).count()
 if foreign:
-    raise ValueError(f"{FILE_PREFIX}: {foreign} transaction(s) nested under a different AccountID in {path}")
+    raise ValueError(f"{file_prefix}: {foreign} transaction(s) nested under a different AccountID in {path}")
 
 duplicates = transactions.groupBy("TransactionID").count().filter("count > 1").count()
 if duplicates:
-    raise ValueError(f"{FILE_PREFIX}: {duplicates} duplicated TransactionID value(s) in {path}")
+    raise ValueError(f"{file_prefix}: {duplicates} duplicated TransactionID value(s) in {path}")
 
 # 4) Same column contract as the CSV loader
 out = transactions.select(
@@ -165,11 +171,11 @@ out = transactions.select(
     out.write.format("delta")
     .mode("overwrite")
     .option("overwriteSchema", "true")
-    .saveAsTable(p_target_table)
+    .saveAsTable(table_name)
 )
-print(f"Loaded {FILE_PREFIX} JSON -> {p_target_table}: {spark.table(p_target_table).count()} rows")
+print(f"Loaded {file_prefix} JSON -> {table_name}")
 if int(p_debug):
-    display(spark.table(p_target_table).limit(10))
+    display(spark.table(table_name).limit(10))
 
 # METADATA ********************
 
@@ -180,16 +186,25 @@ if int(p_debug):
 
 # CELL ********************
 
-# Reconcile with the CSV-loaded ledger of the same batch (skipped when the JSON path replaces it)
-csv_table = "dbo.ld_oys_transaction_ledger"
-if p_target_table.lower() != csv_table:
-    json_df = spark.table(p_target_table).select(*REQUIRED_COLUMNS, "meta_batch_timestamp")
-    csv_df = spark.table(csv_table).select(*REQUIRED_COLUMNS, "meta_batch_timestamp")
-    only_json = json_df.exceptAll(csv_df).count()
-    only_csv = csv_df.exceptAll(json_df).count()
-    print(f"JSON rows: {json_df.count()} | CSV rows: {csv_df.count()} | only in JSON: {only_json} | only in CSV: {only_csv}")
-    if only_json or only_csv:
-        print("WARNING: JSON and CSV landings differ (different batches loaded, or a source mismatch)")
+# Verify only the target written by this invocation.
+summary = (
+    spark.table(table_name)
+    .groupBy("meta_batch_timestamp", "meta_load_timestamp", "meta_source_file")
+    .agg(F.count("*").alias("row_count"))
+    .collect()
+)
+if not summary:
+    raise ValueError(f"{table_name}: no rows after loading batch {batch_folder}")
+for row in summary:
+    if row.meta_batch_timestamp != batch_ts or row.meta_load_timestamp != load_ts:
+        raise ValueError(
+            f"{table_name}: expected batch {batch_ts} and load time {load_ts}; "
+            f"found batch {row.meta_batch_timestamp} and load time {row.meta_load_timestamp}"
+        )
+    print(
+        f"Verified {table_name}: batch={row.meta_batch_timestamp}, "
+        f"load={row.meta_load_timestamp}, file={row.meta_source_file}, rows={row.row_count}"
+    )
 
 # METADATA ********************
 

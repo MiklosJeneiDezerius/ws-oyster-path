@@ -40,7 +40,7 @@ sources:
             description: Name of the CSV file the row came from.
 
       - name: customer_address
-        identifier: ld_oys_customeraddress
+        identifier: ld_oys_customeradress
         description: Customer addresses. Source file prefix is misspelled 'CustomerAdress'.
         columns:
           - name: AddressID

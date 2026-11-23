@@ -1,0 +1,9 @@
+* write a step by step tutorial based on the documentation
+* follow a step by step pattern, like a developer would develop. Think iteratively (create sources.yml, but list only the tables, then add the fields and descriptions, tehn add test, continue the iteration until finished)
+* do keep every snippet where code is present in the documentation
+* include creation of pilines where it is the most appropriate during the development process, Test the smallest useful child pipeline first, then add
+parameters and activities incrementally
+* before every step write down the goal, the reason doing the step, and why it is needed, when and why it will be used
+* before every step include the goal, why we need it, and verification at the end
+* do not include the data generation notebook steps, we will not write it during the tutorial, jsut use it
+
