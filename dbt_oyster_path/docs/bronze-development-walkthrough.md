@@ -829,6 +829,25 @@ an explicit delivery handoff rather than assuming “latest” identifies this r
 > may refer to the former `ld_oys_customeraddress` name; the current target is
 > `ld_oys_customeradress`. See the config-driven pipeline section for its current contract.
 
+The current CSV loader retains all input columns as strings and adds its three
+lineage columns using `withColumn` before writing the Delta table:
+
+```python
+out = (
+    df.withColumn("meta_batch_timestamp", F.lit(batch_ts))
+    .withColumn("meta_load_timestamp", F.lit(load_ts))
+    .withColumn("meta_source_file", F.col("_metadata.file_name"))
+)
+```
+
+`meta_batch_timestamp` comes from the UTC batch-folder name;
+`meta_load_timestamp` is the UTC load time for this notebook invocation; and
+`meta_source_file` identifies the input file. Per-entity invocations share the
+batch timestamp, not necessarily the load timestamp. The loader rejects empty
+inputs and case-insensitive collisions with these metadata column names before
+overwriting the target. It then verifies only that target's rows and timestamps.
+It does not add the `m_*` metadata columns.
+
 These are shared changes for every entity. They replace the duplicated
 single-Customer example and frozen multi-table loop with one execution path.
 Their existing iteration numbers are retained even though this section now
@@ -884,8 +903,8 @@ p_debug = 0
 ```
 
 Mark it **Toggle parameter cell** in Fabric and save/sync the resulting metadata.
-The current exported notebook still instructs the user to do this; do not assume
-pipeline overrides are enabled merely because the variables exist.
+The current exported notebook already has the `# PARAMETERS CELL` marker and
+uses `p_in_table_name` instead of this historical `p_entities` parameter.
 
 Selection logic:
 
@@ -1206,13 +1225,13 @@ for file_prefix, (table_name, out) in prepared.items():
         display(spark.table(table_name).limit(10))
 ```
 
-**Cell 4 - verify the tables written by this invocation:** the
+**Cell 4 - verify the tables written by this historical invocation:** read back
+only the targets in `prepared`, which is built from `p_entities`. The current
 [CSV loader](../../fabric-artifacts/notebooks/nb_csv_load_source_to_ld.Notebook/notebook-content.py)
-reads back only the targets in `prepared`, which is built from `p_entities`.
-It reports row counts by source file and fails if a selected table is empty
-or contains an unexpected batch or load timestamp. A pipeline iteration does
-not check tables owned by other iterations, which may not exist yet or may
-still contain a previous batch.
+instead reads back its single derived target. Both report row counts by source
+file and fail if a checked table is empty or contains an unexpected batch or
+load timestamp. A pipeline iteration does not check tables owned by other
+iterations, which may not exist yet or may still contain a previous batch.
 
 **Goal:** confirm the persisted output of this invocation, not unrelated tables.
 
@@ -5158,7 +5177,8 @@ as a placeholder. Switching to it is a configuration change, not a rewrite.
 **Best practices**
 
 1. Orchestrate tested artefacts; do not put new logic in the pipeline.
-2. Do not replace a validating load with a plain Copy activity.
+2. Do not replace a loader with a plain Copy activity without preserving its
+   metadata, error checks, and any format-specific validation.
 3. One run equals one batch, and it is clear which batch was loaded.
 4. Never store secrets in a notebook, a pipeline definition or Git. Prefer
    Key Vault; if a PAT is temporarily needed, pass it as a SecureString with
@@ -5190,9 +5210,10 @@ loader therefore decides which batch to read:
 At this later orchestration checkpoint, verify the saved parameter marker
 and selected batch before the master depends on the Landing child.
 
-The loader's parameter cell was marked `# CELL` in the source file, not
+The loader's parameter cell was previously marked `# CELL`, not
 `# PARAMETERS CELL`. Fabric therefore did not treat it as a parameter cell,
 and a pipeline override of `p_batch_folder` would have been silently ignored.
+The current source has the corrected marker.
 
 **Loader parameter cell** (`nb_csv_load_source_to_ld`):
 
@@ -5251,7 +5272,7 @@ concurrency guard on the pipeline.
 5. Compare the live definition with the repository copy before uploading,
    and upload only the intended change.
 
-**Verification run:** the generator created folder `20261118072024`. The
+**Historical verification run:** the generator created folder `20261118072024`. The
 loader loaded exactly that batch. All five Landing tables show
 `meta_batch_timestamp = 2026-11-18 07:20:24` with the same load timestamp and
 the expected counts (102, 194, 102, 102, 4,840).
@@ -5360,9 +5381,9 @@ Set v_load_date
  -> nb_resolve_landing_batch (resolve once; return batch folder via notebookutils.notebook.exit)
  -> lkp_GetLoadConfig (Lookup, load_config.csv, firstRowOnly = false)
  -> Filter - active tables (is_active = '1' and is_active_delta = '1')
- -> forEach_FileLoader (sequential)
+ -> forEach_FileLoader (parallel; batchCount = 2)
       sw_FileType on toLower(trim(item().type))
-        csv     -> nb_csv_load_source_to_ld (p_batch_folder, p_in_table_name = item().source_object_name)
+        csv     -> nb_csv_load_source_to_ld (p_batch_folder, p_root_path, p_in_table_name = item().source_object_name)
         json    -> nb_json_load_source_to_ld (p_batch_folder, p_root_path, p_in_table_name = item().source_object_name)
         default -> Fail: UNSUPPORTED_SOURCE_TYPE
 ```
@@ -5383,7 +5404,7 @@ value, even if a newer batch arrives during the run. The CSV loader also
 receives the same `p_root_path`; its standalone latest-batch behavior is unchanged.
 The resolver uses a Spark notebook session, so it can add session startup time.
 
-Each CSV invocation verifies only the tables it wrote. Do not put an
+Each CSV invocation verifies only the table it wrote. Do not put an
 all-table check inside the ForEach; run the optional full-batch check above
 only after all required iterations have succeeded.
 
@@ -5402,7 +5423,7 @@ ForEach, Switch, and Fail, is in the
 v_load_date        @convertFromUtc(utcNow(), 'Central Europe Standard Time', 'yyyy-MM-dd HH:mm:ss')
 resolver input     @coalesce(pipeline().parameters.p_batch_folder, '')
 loader batch       @activity('nb_resolve_landing_batch').output.result.exitValue
-CSV/resolver root  @concat('Files/', pipeline().parameters.p_root_folder)
+loader/resolver root @concat('Files/', pipeline().parameters.p_root_folder)
 active tables      @and(equals(item().is_active, '1'), equals(item().is_active_delta, '1'))
 ```
 
@@ -5517,7 +5538,7 @@ replace the parameter expression with an actual token in the definition.
 | Loader in the ForEach | Reuse `nb_csv_load_source_to_ld` with the source name, or write a new per-table notebook | **Reuse:** one code base and the same `meta_*` columns |
 | Who picks "latest" | Each loader call on its own, or once in the pipeline | **Once in the pipeline:** every entity gets the same folder, even if a new folder appears during the run |
 | How "latest" is found | A small notebook, or Get Metadata + ForEach + If | **One resolver notebook:** replaces the native activity chain and returns one batch to both loader branches; requires a Spark session |
-| ForEach mode | Sequential or parallel (`batchCount`) | **Sequential:** predictable, one Spark session at a time; parallel is a later optimisation |
+| ForEach mode | Sequential or parallel (`batchCount`) | **Parallel:** the current export uses `batchCount: 2`; the earlier tutorial starts sequentially |
 | File type routing | CSV only, or Switch on `type` | **Switch:** `csv` and `json` loaders; any other value fails the run |
 | `v_load_date` | Batch folder name, or run time | **Run time in Budapest local time:** identifies the run in monitoring and later in notifications (O5) |
 | Child call | Execute Pipeline (legacy) or the new Invoke pipeline | **Execute Pipeline:** same workspace, no connection needed; the new activity needs a connection but can call across workspaces |
@@ -5555,7 +5576,7 @@ pipeline succeeded.
 7. Keep retries at 0 until retry behaviour is designed (O5).
 8. Store each pipeline in Git with a unique `logicalId` in `.platform`.
 
-**Verification run:** `pl_Master_Core` ran with default parameters and
+**Historical verification run:** `pl_Master_Core` ran with default parameters and
 completed in about 23.5 minutes. Generate Data created folder
 `20261118093359`. Load Delta resolved the latest batch from four folders to
 `20261118093359`. The Lookup returned five config rows, all five passed the
@@ -5568,10 +5589,10 @@ Two observations follow from the per-entity design:
 - `meta_load_timestamp` now differs per table (09:38 to 09:52), because each
   table is loaded by its own notebook run. `meta_batch_timestamp` is the
   column that ties a consistent load together.
-- Each notebook activity starts its own Spark session, about 3.5 minutes per
-  entity, so the Landing step takes about 18 minutes for five small files.
-  Options for later: run the ForEach in parallel (`batchCount`), enable
-  high-concurrency sessions for pipelines with a shared session tag.
+- In that run, each notebook activity started its own Spark session, about
+  3.5 minutes per entity, so Landing took about 18 minutes for five small files.
+  The current export uses a parallel ForEach with `batchCount: 2` and a shared
+  session tag; these historical timings do not establish its current runtime.
 
 **Acceptance check:** each layer pipeline runs on its own and from the master;
 all Landing tables carry the same, newest `meta_batch_timestamp`; a config row
