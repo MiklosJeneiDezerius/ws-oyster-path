@@ -30,6 +30,7 @@ class JsonLandingLoaderTests(unittest.TestCase):
         self.documents.take.return_value = [object()]
         self.documents.filter.return_value.count.return_value = 0
         self.transactions = self.documents.select.return_value.select.return_value
+        self.transactions.take.return_value = [object()]
         self.transactions.filter.return_value.count.return_value = 0
         self.transactions.groupBy.return_value.count.return_value.filter.return_value.count.return_value = 0
         self.scope = {
@@ -47,6 +48,12 @@ class JsonLandingLoaderTests(unittest.TestCase):
     def test_reads_source_and_overwrites_derived_target(self):
         self.run_cell(BATCH_CELL)
         self.run_cell(READ_CELL)
+        self.transactions.select.assert_called_once_with(
+            "TransactionID", "AccountID", "Amount", "Timestamp",
+            self.functions.lit.return_value.alias.return_value,
+            self.functions.lit.return_value.alias.return_value,
+            "meta_source_file",
+        )
         self.spark.read.schema.return_value.option.return_value.json.assert_called_once_with(
             "Files/landing/custom/20261117080003/Transaction_Ledger_*.json"
         )
@@ -83,6 +90,28 @@ class JsonLandingLoaderTests(unittest.TestCase):
         self.run_cell(BATCH_CELL)
         self.documents.filter.return_value.count.return_value = 1
         with self.assertRaisesRegex(ValueError, "document\\(s\\)"):
+            self.run_cell(READ_CELL)
+        self.transactions.select.return_value.write.format.assert_not_called()
+
+    def test_empty_transaction_output_fails_before_write(self):
+        self.run_cell(BATCH_CELL)
+        self.transactions.take.return_value = []
+        with self.assertRaisesRegex(ValueError, "no transaction rows"):
+            self.run_cell(READ_CELL)
+        self.transactions.select.assert_not_called()
+
+    def test_invalid_transactions_fail_before_write(self):
+        self.run_cell(BATCH_CELL)
+        counts = self.transactions.filter.return_value.count
+        for responses, message in (([1], "empty required field"), ([0, 1], "different AccountID")):
+            with self.subTest(message=message):
+                counts.side_effect = responses
+                with self.assertRaisesRegex(ValueError, message):
+                    self.run_cell(READ_CELL)
+        counts.side_effect = None
+        counts.return_value = 0
+        self.transactions.groupBy.return_value.count.return_value.filter.return_value.count.return_value = 1
+        with self.assertRaisesRegex(ValueError, "duplicated TransactionID"):
             self.run_cell(READ_CELL)
         self.transactions.select.return_value.write.format.assert_not_called()
 

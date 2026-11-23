@@ -46,8 +46,10 @@ p_debug = 0           # 1 = display a preview of the loaded table
 # The generator writes `Transaction_Ledger_<ts>.json` as JSON Lines: one document per account, with the
 # transactions split into arrays of 20 (`Data.TransactionBatches`, an array of arrays).
 # `flatten()` merges the inner arrays into one array per account and `explode()` emits one row per
-# transaction. The result has the same columns as the CSV-loaded `ld_oys_transaction_ledger`.
-# The target is derived from the source name, as in the CSV loader, and is overwritten.
+# transaction. For the generator's equivalent CSV and JSON files, the business columns and batch
+# timestamp match the CSV-loaded `ld_oys_transaction_ledger`; source filename and load time can differ.
+# The target is derived from the source name, as in the CSV loader, and is overwritten. Enable
+# only one format per source: the two loaders must not overwrite this table concurrently.
 
 # CELL ********************
 
@@ -91,8 +93,8 @@ print(f"Batch {batch_folder} (of {len(batch_folders)}) | source: {file_prefix} |
 
 # CELL ********************
 
-# Explicit schema: no inference cost, no surprise types. Every leaf is STRING, so JSON numbers keep
-# their raw text (as in the CSV landing); types are applied in Silver.
+# Explicit schema: every transaction field is STRING, as in the CSV landing; types are applied in
+# Silver. The generator writes IDs as JSON integers and Amount/Timestamp as strings.
 transaction_schema = StructType([StructField(c, StringType()) for c in REQUIRED_COLUMNS])
 document_schema = StructType([
     StructField("SourceSystem", StringType()),
@@ -133,6 +135,8 @@ transactions = (
     )
     .select("envelope_account_id", "tx.*", "meta_source_file")
 )
+if not transactions.take(1):
+    raise ValueError(f"{file_prefix}: source file contains no transaction rows in {path}")
 
 # 3) Row validation: required fields present, transaction belongs to its envelope account, unique key
 missing = transactions.filter(

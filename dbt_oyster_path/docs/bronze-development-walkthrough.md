@@ -1326,8 +1326,10 @@ documents = (
 ```
 
 **Why:** schema inference costs an extra pass and can change types between
-deliveries. Every leaf is `STRING`, exactly like the CSV Landing; JSON numbers
-keep their raw text, and typing stays in Silver. `FAILFAST` turns a broken line
+deliveries. Every leaf is `STRING`, exactly like the CSV Landing. The generator
+writes IDs as JSON integers and the amount and timestamp as strings, matching
+the CSV values; arbitrary JSON number representations are not guaranteed to
+preserve their original spelling. Typing stays in Silver. `FAILFAST` turns a broken line
 into a failed run; the default `PERMISSIVE` mode would load it as a null row.
 
 #### Step 2. Validate the envelope before exploding

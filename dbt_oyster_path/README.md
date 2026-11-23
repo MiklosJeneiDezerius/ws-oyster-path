@@ -18,7 +18,12 @@ or required CSV columns. Batch time is shared across a pipeline run; load time
 is specific to each notebook invocation.
 
 The [JSON loader](../fabric-artifacts/notebooks/nb_json_load_source_to_ld.Notebook/notebook-content.py)
-currently supports `Transaction_Ledger` and validates its nested data. The
+currently supports `Transaction_Ledger` and validates its nested data. For
+the generator's matching files it produces the same string business columns,
+rows and batch timestamp as CSV. The source filename and load timestamp
+identify the actual file and invocation, so they can differ. Unlike the CSV
+loader, JSON also rejects missing required fields, account mismatches and
+duplicate transaction IDs. The
 [Landing pipeline](../fabric-artifacts/pipelines/pl_jb_landing_delta.DataPipeline/pipeline-content.json)
 resolves the batch once and passes the root, batch, and source name to either
 loader. Its ForEach runs up to two iterations in parallel; enable only one
