@@ -1,22 +1,12 @@
-dbt_oyster_path:
-  target: dev
+dbt_oyster_demo_test:
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
   outputs:
     dev:
       type: fabric
       driver: 'ODBC Driver 18 for SQL Server'
-      server: 'xe6b73af6wce5cpkwv3dpk3vzi-g67texv6yj3enfghs4qteohnga.datawarehouse.fabric.microsoft.com'
+      server: "{{ env_var('DBT_SERVER', 'xe6b73af6wce5cpkwv3dpk3vzi-g67texv6yj3enfghs4qteohnga.datawarehouse.fabric.microsoft.com') }}"
       port: 1433
-      database: 'dw_oyster_path'
-      schema: 'oyster'
+      database: "{{ env_var('DBT_DATABASE', 'dw_oyster_path') }}"
+      schema: 'oystr'
       authentication: 'CLI'
-      threads: 1  # Fabric Warehouse deadlocks on parallel DDL; see walkthrough Iteration 59
-    
-    prod:
-      type: fabric
-      driver: 'ODBC Driver 18 for SQL Server'
-      server: "{{ env_var('DBT_PROD_HOST', 'xe6b73af6wce5cpkwv3dpk3vzi-g67texv6yj3enfghs4qteohnga.datawarehouse.fabric.microsoft.com') }}"
-      port: 1433
-      database: "{{ env_var('DBT_PROD_DATABASE', 'dw_oyster_path') }}"
-      schema: 'oyster'
-      authentication: 'CLI'
-      threads: 1  # Fabric Warehouse deadlocks on parallel DDL; see walkthrough Iteration 59
+      threads: 4

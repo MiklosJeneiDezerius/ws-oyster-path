@@ -1,0 +1,19 @@
+version: 2
+
+sources:
+  - name: landing_delta_core
+    database: "{{ env_var('DBT_SOURCE_DATABASE', 'lh_oyster_path') }}"
+    schema: dbo
+    tables:
+      - name: customer
+        identifier: ld_oys_customer
+      - name: customeraddress
+        identifier: "{{ env_var('DBT_ADDRESS_TABLE', 'ld_oys_customeraddress') }}"
+        config:
+          enabled: "{{ var('include_address', false) }}"
+      - name: account
+        identifier: ld_oys_account
+      - name: debitcard
+        identifier: ld_oys_debitcard
+      - name: transaction
+        identifier: ld_oys_transaction_ledger

@@ -2,11 +2,11 @@
 # Name your project! Project names should contain only lowercase characters
 # and underscores. A good package name should reflect your organization's
 # name or the intended use of these models
-name: 'dbt_oyster_path'
+name: 'dbt_oyster_demo_test_core'
 version: '1.0.0'
 
 # This setting configures which "profile" dbt uses for this project.
-profile: 'dbt_oyster_path'
+profile: 'dbt_oyster_demo_test'
 
 # These configurations specify where dbt should look for different types of files.
 # The `model-paths` config, for example, states that models in this project can be
@@ -19,14 +19,8 @@ macro-paths: ["macros"]
 snapshot-paths: ["snapshots"]
 
 vars:
-  silver_date_start: '2020-01-01'
-  silver_date_end: '2035-12-31'
-  # Initial-load policy: extend each business key's first observed version
-  # back to 0001-01-01 and flag it with is_inferred_start.
-  silver_infer_initial_history: true
-  gold_tier_gold_threshold: 2000
-  gold_tier_platinum_threshold: 5000
-  gold_snapshot_end_date: '2026-11-09'
+  target_snapshot_db: "{{ env_var('DBT_DATABASE', 'dw_oyster_path') }}"
+  target_snapshot_schema: 'snapshots'
 
 clean-targets:         # directories to be removed by `dbt clean`
   - "target"
@@ -40,22 +34,21 @@ clean-targets:         # directories to be removed by `dbt clean`
 # directory as views. These settings can be overridden in the individual model
 # files using the `{{ config(...) }}` macro.
 models:
-  dbt_oyster_path:
-    # Config indicated by + and applies to all files under models/example/
-    example:
+  dbt_oyster_demo_test_core:
+    "010_bronze":
+      +materialized: table
+      +schema: core_bronze
+    "020_silver":
+      +materialized: table
+      +schema: core_silver
+    "030_gold":
+      +materialized: table
+      +schema: core_gold
+    "050_dq":
       +materialized: view
-    015_BIS:
-      +schema: silver
-      +materialized: table
-    020_Silver:
-      +schema: silver
-      +materialized: table
-    030_Gold:
-      +schema: gold
-      +materialized: table
+      +schema: core_dq
 
-# Bronze layer = historized (SCD2) copies of the landing tables, built with dbt snapshots.
-snapshots:
-  dbt_oyster_path:
-    +schema: bronze
-    +dbt_valid_to_current: "cast('9999-12-31' as datetime2(6))"
+data_tests:
+  dbt_oyster_demo_test_core:
+    +store_failures: true
+    +schema: core_dq

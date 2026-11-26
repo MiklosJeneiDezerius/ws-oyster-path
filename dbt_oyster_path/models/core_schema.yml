@@ -1,0 +1,277 @@
+version: 2
+
+models:
+  - name: b_oys_customer_address
+    description: "Optional current address extract; history is retained in b_oys_customer_address_history."
+    data_tests:
+      - unique:
+          arguments:
+            column_name: "[address_id]"
+    columns:
+      - name: batch_id
+        data_tests: [not_null]
+      - name: address_id
+        data_tests: [not_null]
+      - name: customer_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('b_oys_customer')
+                field: customer_id
+      - name: postal_code
+        description: "Text, not a number, to preserve leading zeroes."
+      - name: house_number
+        description: "Text to support values such as 12/A."
+  - name: b_oys_customer
+    description: "Current core customer extract; history is retained in b_oys_customer_history."
+    data_tests:
+      - unique:
+          arguments:
+            column_name: "[customer_id]"
+    columns:
+      - name: batch_id
+        description: "dbt invocation ID for the latest full source read."
+      - name: customer_id
+        data_tests: [not_null]
+  - name: b_oys_account
+    description: "Current core account extract; history is retained in b_oys_account_history."
+    data_tests:
+      - unique:
+          arguments:
+            column_name: "[account_id]"
+    columns:
+      - name: batch_id
+        description: "dbt invocation ID for the latest full source read."
+      - name: account_id
+        data_tests: [not_null]
+      - name: customer_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('b_oys_customer')
+                field: customer_id
+      - name: balance_amt
+        data_tests: [not_null]
+  - name: b_oys_debit_card
+    description: "Current core debit-card extract; history is retained in b_oys_debit_card_history."
+    data_tests:
+      - unique:
+          arguments:
+            column_name: "[card_id]"
+      - unique:
+          arguments:
+            column_name: "[account_id]"
+    columns:
+      - name: batch_id
+        description: "dbt invocation ID for the latest full source read."
+      - name: card_id
+        data_tests: [not_null]
+      - name: account_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('b_oys_account')
+                field: account_id
+      - name: card_tier_nm
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Standard', 'Gold', 'Platinum']
+  - name: b_oys_transaction
+    description: "Current core transaction extract; history is retained in b_oys_transaction_history."
+    data_tests:
+      - unique:
+          arguments:
+            column_name: "[transaction_id]"
+    columns:
+      - name: batch_id
+        description: "dbt invocation ID for the latest full source read."
+      - name: transaction_id
+        data_tests: [not_null]
+      - name: account_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('b_oys_account')
+                field: account_id
+      - name: transaction_amt
+        data_tests: [not_null]
+      - name: transaction_dttm
+        data_tests: [not_null]
+  - name: s_dim_customer
+    description: "Customer history using SCD2 versions from the dbt snapshot."
+    columns:
+      - name: s_dim_customer_sk
+        data_tests: [not_null, unique]
+      - name: customer_id
+        data_tests: [not_null]
+      - name: permanent_address
+        description: "Permanent street/house number, city, postal code and country observed for this customer version."
+      - name: mailing_address
+        description: "Mailing address observed for this customer version; null when not supplied."
+      - name: billing_address
+        description: "Billing address observed for this customer version; null when not supplied."
+      - name: valid_from_dttm
+        data_tests: [not_null]
+      - name: valid_to_dttm
+        data_tests: [not_null]
+      - name: is_current_version_flag
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+  - name: s_dim_card
+    description: "Debit-card history using SCD2 versions from the dbt snapshot."
+    columns:
+      - name: s_dim_card_sk
+        data_tests: [not_null, unique]
+      - name: card_id
+        data_tests: [not_null]
+      - name: s_dim_account_sk
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('s_dim_account')
+                field: s_dim_account_sk
+      - name: card_tier_nm
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Standard', 'Gold', 'Platinum']
+      - name: valid_from_dttm
+        data_tests: [not_null]
+      - name: valid_to_dttm
+        data_tests: [not_null]
+      - name: is_current_version_flag
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+  - name: s_dim_account
+    description: "One row per account with optional debit-card attributes; cardless accounts are retained."
+    columns:
+      - name: s_dim_account_sk
+        data_tests: [not_null, unique]
+      - name: account_id
+        data_tests: [not_null, unique]
+      - name: s_dim_customer_sk
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('s_dim_customer')
+                field: s_dim_customer_sk
+  - name: s_dim_date
+    columns:
+      - name: s_dim_date_sk
+        data_tests: [not_null, unique]
+      - name: full_dt
+        data_tests: [not_null, unique]
+  - name: s_fct_transaction
+    columns:
+      - name: s_fct_transaction_sk
+        data_tests: [not_null, unique]
+      - name: s_dim_account_sk
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('s_dim_account')
+                field: s_dim_account_sk
+      - name: s_dim_customer_sk
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('s_dim_customer')
+                field: s_dim_customer_sk
+      - name: s_dim_date_sk
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('s_dim_date')
+                field: s_dim_date_sk
+  - name: ga_dim_account
+    columns:
+      - name: ga_dim_account_sk
+        data_tests: [not_null, unique]
+      - name: account_id
+        data_tests: [not_null, unique]
+  - name: ga_dim_customer
+    columns:
+      - name: ga_dim_customer_sk
+        data_tests: [not_null, unique]
+      - name: customer_id
+        data_tests: [not_null]
+  - name: g_dim_date
+    columns:
+      - name: g_dim_date_sk
+        data_tests: [not_null, unique]
+      - name: full_dt
+        data_tests: [not_null, unique]
+  - name: g_fct_periodic_spend_snapshot
+    description: "One row per account per day from 2025-01-01; 30-day spend includes 29 warm-up days."
+    columns:
+      - name: g_fct_periodic_spend_snapshot_sk
+        data_tests: [not_null, unique]
+      - name: s_dim_date_sk
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('g_dim_date')
+                field: g_dim_date_sk
+      - name: s_dim_account_sk
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('ga_dim_account')
+                field: ga_dim_account_sk
+      - name: s_dim_customer_sk
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('ga_dim_customer')
+                field: ga_dim_customer_sk
+      - name: s_dim_card_sk
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('s_dim_card')
+                field: s_dim_card_sk
+      - name: actual_card_tier_nm
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Standard', 'Gold', 'Platinum']
+      - name: is_upgrade_candidate_flag
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: is_low_spend_premium_anomaly_flag
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: alignment_status_cd
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Aligned', 'Misaligned']
+      - name: calculated_spending_tier_nm
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Standard', 'Gold', 'Platinum']
+  - name: fail_transactions_without_accountid
+    description: "Diagnostic view exposing transactions with missing account_id."

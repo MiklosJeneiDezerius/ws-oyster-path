@@ -1,0 +1,18 @@
+SELECT
+    [s_dim_date_sk] AS [g_dim_date_sk]
+    ,[full_dt]
+    ,[calendar_year_num]
+    ,[calendar_quarter_num]
+    ,[calendar_quarter_nm]
+    ,[month_of_year_num]
+    ,[month_nm]
+    ,[month_short_nm]
+    ,[week_of_year_num]
+    ,[day_of_month_num]
+    ,[day_of_year_num]
+    ,[day_of_week_num]
+    ,[day_nm]
+    ,[day_short_nm]
+    ,[is_weekend_flag]
+    ,[year_month_cd]
+FROM {{ ref('s_dim_date') }}

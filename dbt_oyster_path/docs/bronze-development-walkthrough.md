@@ -35,9 +35,11 @@ transactions resolve to account and customer versions under the initial-load
 history policy (Iteration 56). The Gold daily snapshot covers 2026-10-09 to
 2026-11-09 with 102 accounts per day and reconciles exactly with an
 independent recalculation from Silver. The semantic model and report are
-designed (Iteration 60) but not yet created. Orchestration O1-O4 is implemented
-and tested; retry/notification handling, scheduling, and semantic-model refresh
-remain follow-up work. Production builds have not been run.
+designed (Iteration 60) but not yet created in that historical run.
+Orchestration O1-O4 was implemented and tested; retry/notification handling
+and scheduling remain follow-up work. The current master export includes a
+semantic-model refresh activity, but its destination, connection, and actual
+execution need separate verification. Production builds have not been run.
 
 ## How to use this guide
 
@@ -5065,6 +5067,66 @@ part rebuilds that idea in Fabric, one small iteration at a time. Each
 iteration reuses artefacts that are already tested; no new transformation
 logic is written inside the pipeline.
 
+### Architecture: master, child pipelines, and notebooks
+
+The pipeline is the **orchestrator**, not the data-processing implementation.
+In this project the master invokes child pipelines, and the children invoke
+notebooks through Notebook activities; the notebooks do not invoke the
+pipelines. The master also contains a native semantic-model refresh activity.
+This division makes the control flow visible in Fabric while keeping executable
+Python, Spark, and dbt logic in independently testable items.
+
+| Item | Purpose and responsibility |
+|---|---|
+| Master: [`pl_fl_master`](../../fabric-artifacts/pipelines/e316df99-b1e8-b45a-430b-9968433f6858.DataPipeline/pipeline-content.json) | Provides the overall entry point and orders generation, Landing, DW build, and semantic-model refresh. It waits for the children and uses success dependencies so a failed step does not start its downstream step. The tutorial's earlier workspace master is called `pl_Master_Core`. |
+| Raw child: [`pl_jb_landing_raw`](../../fabric-artifacts/pipelines/pl_jb_landing_raw.DataPipeline/pipeline-content.json) | Wraps sample-data generation as an independently runnable unit and passes `p_simulate_changes` to the generator. The historical workspace name is `pl_Landing_Raw_Core`. |
+| Landing child: [`pl_jb_landing_delta`](../../fabric-artifacts/pipelines/pl_jb_landing_delta.DataPipeline/pipeline-content.json) | Resolves one batch, reads and filters the load configuration, and routes active sources to the CSV or JSON loader. The parallel loop uses a maximum batch count of two; an unsupported format fails explicitly. The historical workspace name is `pl_Landing_Delta_Core`. |
+| DW child: [`pl_jb_create_dw`](../../fabric-artifacts/pipelines/pl_jb_create_dw.DataPipeline/pipeline-content.json) | Exposes the dbt runner and its inputs as a separately runnable Warehouse build and test step. The historical workspace name is `pl_Create_DW_Core`. |
+
+Separate children split the workflow into smaller, easier-to-understand
+units. Each child can be tested independently with controlled inputs and
+its own acceptance checks, making failures easier to isolate than in one
+large pipeline. An operator can also diagnose and rerun a layer without
+automatically repeating every earlier layer. A rerun still needs deliberate
+inputs: for example, specify the original Landing batch rather than relying
+on latest if the same delivery must be replayed. A successful child rerun
+does not automatically resume the remaining master activities.
+
+The notebooks called by these children perform the actual work:
+
+| Notebook | Purpose |
+|---|---|
+| [`nb_generate_deterministic_sample_data`](../../fabric-artifacts/notebooks/nb_generate_deterministic_sample_data.Notebook/notebook-content.py) | Produces reproducible synthetic source files in a batch folder; the change-simulation parameter lets snapshot and incremental behavior be tested. |
+| [`nb_resolve_landing_batch`](../../fabric-artifacts/notebooks/nb_resolve_landing_batch.Notebook/notebook-content.py) | Selects and validates the requested or latest batch once and returns its folder through `notebookutils.notebook.exit`. All loaders therefore use the same batch even if a newer one arrives during the run. |
+| [`nb_csv_load_source_to_ld`](../../fabric-artifacts/notebooks/nb_csv_load_source_to_ld.Notebook/notebook-content.py) | Loads a configured CSV entity into a Landing Delta table, checks the input and written data, and adds batch, load-time, and source-file metadata. It does not validate business keys or required business columns. |
+| [`nb_json_load_source_to_ld`](../../fabric-artifacts/notebooks/nb_json_load_source_to_ld.Notebook/notebook-content.py) | Validates and flattens nested transaction JSON into Landing Delta, with the same metadata. Its current JSON support is limited to `Transaction_Ledger`. |
+| [`nb_run_dbt`](../../fabric-artifacts/notebooks/nb_run_dbt.Notebook/notebook-content.py) | Sets up the pinned dbt runtime, obtains the project and credentials, refreshes the Lakehouse SQL endpoint metadata when configured, runs dbt, and persists run artifacts. Errors are raised to the calling pipeline. The SQL endpoint refresh lets dbt see the latest Landing Delta versions; it is not a semantic-model refresh. |
+
+**Why notebooks here?** They provide a parameterized Fabric execution
+environment with Python, Spark, Lakehouse access, and notebook utilities.
+That is useful for reusable batch selection, format-specific validation and
+Delta writes, and the custom dbt setup, authentication, and subprocess. They
+can also be run and inspected independently before pipeline integration.
+The pipeline remains responsible for dependencies, routing, parameters, and
+monitoring rather than embedding those processing details in activity
+expressions. Notebook exceptions make the activity fail and propagate failure
+to the waiting caller.
+
+This is a choice for these requirements, not a rule that every activity needs
+a notebook: Lookup, Filter, ForEach, Switch, and semantic refresh are native
+activities here. Notebook sessions have startup and capacity costs, and the
+dbt runner owns package installation, cloning, and authentication code. A
+native activity, Fabric dbt job, or external runner may be preferable when it
+meets the requirements with less operational overhead.
+
+**Current export versus historical run:** the checked-in master includes
+`Refresh semantic model` after the DW step, but `Generate Data` is inactive
+and marked as succeeded. Thus a successful master run does not by itself
+prove that fresh sample data was generated. The refresh is configured to wait
+for completion, but its model and connection bindings and actual outcome
+must be verified in the target workspace. See the master input and security
+notes in Iteration 63 before running it with a real credential.
+
 ### Iteration 61 (O1). Map the document to Fabric and decide how dbt runs
 
 **Goal:** decide, before creating any item, what each document step becomes
@@ -5098,9 +5160,9 @@ pl_master_orchestration  (triggered manually)
 ```
 
 Iteration 63 (O3) creates one pipeline per layer and `pl_Master_Core`.
-Iteration 64 (O4) adds its dbt/DW child pipeline. A semantic-model refresh
-after the DW build remains planned follow-up work; it is not in the current
-master definition.
+Iteration 64 (O4) adds its dbt/DW child pipeline. The historical O1-O4 run
+did not include semantic-model refresh; the current master export includes
+that activity, whose deployment and execution must be verified separately.
 
 `nb_run_dbt` performs these steps:
 
@@ -5123,9 +5185,10 @@ master definition.
 7. Raise an exception when dbt fails, so the pipeline activity fails.
 
 The dbt `build` creates or updates the Warehouse objects and data; there is no
-separate DW refresh step. A semantic-model refresh should be added after
-`DW create and test` succeeds, and should wait for the full refresh to
-complete. This is a follow-up iteration, not part of the current pipeline.
+separate DW refresh step. The exported master places semantic-model refresh
+after `DW create and test` succeeds and configures it to wait for completion.
+Verify the model and connection bindings and the actual refresh in the
+target workspace.
 See Microsoft's
 [Semantic model refresh activity documentation](https://learn.microsoft.com/en-us/fabric/data-factory/semantic-model-refresh-activity).
 
@@ -5308,8 +5371,9 @@ pl_Master_Core
 ```
 
 The workspace master initially had the first two activities. O4 adds the DW
-child pipeline after Landing succeeds. The semantic-model refresh remains a
-planned follow-up and is not yet in the current workspace definition.
+child pipeline after Landing succeeds. That historical run did not include
+semantic-model refresh; the current repository export does, subject to the
+binding and execution checks described below.
 
 **Why:**
 
@@ -5492,8 +5556,8 @@ as "Invoke pipeline (Legacy)" in the UI), both with `waitOnCompletion: true`.
 `referenceName` is the child pipeline's item id. `p_simulate_changes` is
 passed to the generator; `p_batch_folder` is passed empty to Landing, so a
 normal run loads the batch that was just generated. The DW child receives the
-secure `p_ado_token` parameter. A semantic-model refresh is a planned
-follow-up after the DW child succeeds.
+secure `p_ado_token` parameter. Semantic-model refresh was a planned
+follow-up at the time of this historical run.
 
 **Master inputs: distinguish expressions from literals.** The preceding
 flow describes the historical tutorial run. The current checked-in
@@ -5922,7 +5986,7 @@ Test workspace and run data/report smoke checks before requesting production app
 | In Fabric Development (`ws-oyster-path`), check **Workspace settings > Git integration** for Oyster, `main`, and the intended folder. Open **Source control > Updates**, review the incoming changes and select **Update all** only if they match the candidate. | The workspace shows the approved commit as synced. If it has local changes, conflicts, or newer unapproved changes, stop and resolve them before promotion. | A merge alone does not update a workspace. Do not overwrite someone else's work or silently promote a newer revision. |
 | For the initial ALM setup, open **Workspaces > Deployment pipelines > Create pipeline** (or **+ New pipeline**). Use **Development**, **Test** (UAT), and **Production**; assign a separate capacity-backed workspace to each stage with **Assign a workspace**. | The stages point to distinct workspaces with the required permissions. Test and Production are not also updated directly from the same Git branch in this workflow. | One promotion path per environment prevents concurrent writers and accidental production tests. |
 | Select **Test** as the target and use **Compare** / **Compare stages**. Select the approved items and missing dependencies; choose **Deploy** (in the original UI, select the source items and choose **Deploy** to Test). | The deployment history lists the expected items. In Test, verify the Warehouse, Lakehouse SQL endpoint, log Lakehouse, notebook references, Power BI connection, and semantic model target. | Deployment copies definitions, not table data. Do not assume that hard-coded IDs, credentials, or data sources rebind automatically. |
-| After the destination checks, open the master data pipeline `pl_Master_Core` **in Test** and select **Run** with the approved test configuration. Open **Monitoring hub** (or the pipeline's run history), select the run and inspect each activity. | Landing completes, `nb_run_dbt` refreshes the Test Lakehouse SQL endpoint before `dbt build`, dbt models and tests pass, and (after the planned semantic-refresh step is implemented) the Test semantic model refresh succeeds only after the DW step. Check `Files/dbt_runs/.../run_info.json` and `run_results.json` in the Test Lakehouse; confirm the commit, target and results. Then open the Test report and check a known KPI against the test data. | This verifies deployed bindings, real SQL, data quality and the reporting hand-off, none of which the parse job can prove. |
+| After the destination checks, open the master data pipeline `pl_Master_Core` **in Test** and select **Run** with the approved test configuration. Open **Monitoring hub** (or the pipeline's run history), select the run and inspect each activity. | Landing completes, `nb_run_dbt` refreshes the Test Lakehouse SQL endpoint before `dbt build`, dbt models and tests pass, and the Test semantic model refresh succeeds only after the DW step once the exported refresh activity is correctly bound and verified in Test. Check `Files/dbt_runs/.../run_info.json` and `run_results.json` in the Test Lakehouse; confirm the commit, target and results. Then open the Test report and check a known KPI against the test data. | This verifies deployed bindings, real SQL, data quality and the reporting hand-off, none of which the parse job can prove. |
 
 **Required before enabling UAT/Prod runs:** provide stage-specific source and
 Warehouse targets, credentials, and item/connection IDs. The current runner
