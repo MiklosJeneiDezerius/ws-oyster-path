@@ -1,0 +1,93 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "43f9b73d93020b3e58a3",
+  "position": {
+    "x": 18,
+    "y": 351,
+    "z": 6,
+    "height": 428,
+    "width": 600,
+    "tabOrder": 4
+  },
+  "visual": {
+    "visualType": "hundredPercentStackedBarChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "ga_dim_account"
+                    }
+                  },
+                  "Property": "CardTier"
+                }
+              },
+              "queryRef": "ga_dim_account.CardTier",
+              "nativeQueryRef": "CardTier",
+              "active": true
+            }
+          ]
+        },
+        "Series": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "g_fct_periodic_spend_snapshot"
+                    }
+                  },
+                  "Property": "AlignmentStatus"
+                }
+              },
+              "queryRef": "g_fct_periodic_spend_snapshot.AlignmentStatus",
+              "nativeQueryRef": "AlignmentStatus"
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "g_fct_periodic_spend_snapshot"
+                    }
+                  },
+                  "Property": "Total No. of Cards"
+                }
+              },
+              "queryRef": "g_fct_periodic_spend_snapshot.Total No. of Cards",
+              "nativeQueryRef": "Total No. of Cards"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Measure": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "g_fct_periodic_spend_snapshot"
+                  }
+                },
+                "Property": "Total No. of Cards"
+              }
+            },
+            "direction": "Descending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

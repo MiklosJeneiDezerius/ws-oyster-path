@@ -7,9 +7,9 @@
           "notebookId": "9dc71be6-166c-8df7-462f-1f83d256a2b8",
           "workspaceId": "00000000-0000-0000-0000-000000000000",
           "parameters": {
-            "p_simulate_changes": {
+            "num_customers": {
               "value": {
-                "value": "@pipeline().parameters.p_simulate_changes",
+                "value": "@pipeline().parameters.num_customers",
                 "type": "Expression"
               },
               "type": "int"
@@ -17,20 +17,20 @@
           }
         },
         "policy": {
-          "timeout": "0.01:00:00",
+          "timeout": "0.12:00:00",
           "retry": 0,
           "retryIntervalInSeconds": 30,
           "secureInput": false,
           "secureOutput": false
         },
-        "name": "nb_generate_deterministic_sample_data",
+        "name": "gen_source_data",
         "dependsOn": []
       }
     ],
     "parameters": {
-      "p_simulate_changes": {
+      "num_customers": {
         "type": "int",
-        "defaultValue": 0
+        "defaultValue": 83
       }
     }
   }

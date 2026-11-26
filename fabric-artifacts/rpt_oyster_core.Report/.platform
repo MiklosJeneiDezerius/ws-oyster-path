@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Report",
+    "displayName": "rpt_oyster_core"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "8e5669ad-bd66-9256-46d1-f95948b79eb4"
+  }
+}

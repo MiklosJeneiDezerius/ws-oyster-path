@@ -1,0 +1,75 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.14.0/schema.json",
+  "name": "5cae5958e3d32a5ae1fc",
+  "position": {
+    "x": 987.95454545454538,
+    "y": 351.30681818181813,
+    "z": 4,
+    "height": 428.01136363636363,
+    "width": 879.03409090909088,
+    "tabOrder": 2
+  },
+  "visual": {
+    "visualType": "donutChart",
+    "query": {
+      "queryState": {
+        "Category": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "ga_dim_account"
+                    }
+                  },
+                  "Property": "CardTier"
+                }
+              },
+              "queryRef": "ga_dim_account.CardTier",
+              "nativeQueryRef": "CardTier",
+              "active": true
+            }
+          ]
+        },
+        "Y": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "g_fct_periodic_spend_snapshot"
+                    }
+                  },
+                  "Property": "Misaligned Cards"
+                }
+              },
+              "queryRef": "g_fct_periodic_spend_snapshot.Misaligned Cards",
+              "nativeQueryRef": "Misaligned Cards"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Measure": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "g_fct_periodic_spend_snapshot"
+                  }
+                },
+                "Property": "Misaligned Cards"
+              }
+            },
+            "direction": "Descending"
+          }
+        ],
+        "isDefaultSort": true
+      }
+    },
+    "drillFilterOtherVisuals": true
+  }
+}

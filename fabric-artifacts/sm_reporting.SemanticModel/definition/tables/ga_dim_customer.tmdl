@@ -1,0 +1,66 @@
+/// Current customer dimension for grouping and filtering spend measures by customer. Use FullName or CustomerID as the customer label.
+table ga_dim_customer
+	lineageTag: e34a4228-c94e-4b08-a19e-0181028f917a
+
+	column CustomerSK
+		dataType: string
+		isHidden
+		sourceProviderType: varchar(64)
+		lineageTag: 6ee0c5dd-1c8c-43f7-bb70-8ac568ab8429
+		sourceLineageTag: ga_dim_customer_sk
+		summarizeBy: none
+		sourceColumn: ga_dim_customer_sk
+
+		annotation SummarizationSetBy = Automatic
+
+	column CustomerID
+		dataType: int64
+		sourceProviderType: int
+		lineageTag: 9ff86f2a-bd54-4d9f-ae8e-8e5f29379cc2
+		sourceLineageTag: customer_id
+		summarizeBy: none
+		sourceColumn: customer_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column FirstName
+		dataType: string
+		sourceProviderType: varchar(8000)
+		lineageTag: d4b716ba-4a14-4013-857f-7591118eb6c5
+		sourceLineageTag: first_nm
+		summarizeBy: none
+		sourceColumn: first_nm
+
+		annotation SummarizationSetBy = Automatic
+
+	column LastName
+		dataType: string
+		sourceProviderType: varchar(8000)
+		lineageTag: 2664b394-d936-4df1-84e6-0b7fc087c80b
+		sourceLineageTag: last_nm
+		summarizeBy: none
+		sourceColumn: last_nm
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Customer display name; prefer this customer-dimension field when grouping measures by customer.
+	column FullName
+		dataType: string
+		sourceProviderType: varchar(8000)
+		lineageTag: ec14dd8e-7825-4084-a7a0-1f79980e05e4
+		sourceLineageTag: full_nm
+		isDefaultLabel
+		summarizeBy: none
+		sourceColumn: full_nm
+
+		annotation SummarizationSetBy = Automatic
+
+	partition ga_dim_customer = entity
+		mode: directLake
+		source
+			entityName: ga_dim_customer
+			schemaName: oystr_core_gold
+			expressionSource: DatabaseQuery
+
+	annotation PBI_ResultType = Table
+

@@ -7,74 +7,42 @@
           "notebookId": "bb04c3a5-b773-90c7-4288-5968b3b1737d",
           "workspaceId": "00000000-0000-0000-0000-000000000000",
           "parameters": {
-            "p_ado_token": {
-              "value": {
-                "value": "@pipeline().parameters.p_ado_token",
-                "type": "Expression"
-              },
+            "repo_url": {
+              "value": "https://github.com/MiklosJeneiDezerius/demo_oyster_test.git",
               "type": "string"
             },
-            "p_branch": {
-              "value": {
-                "value": "@pipeline().parameters.p_branch",
-                "type": "Expression"
-              },
+            "branch": {
+              "value": "main",
               "type": "string"
             },
-            "p_dbt_target": {
-              "value": {
-                "value": "@pipeline().parameters.p_dbt_target",
-                "type": "Expression"
-              },
+            "dbt_subfolder": {
+              "value": "dbt_oyster_demo_test_core",
               "type": "string"
             },
-            "p_dbt_command": {
-              "value": {
-                "value": "@pipeline().parameters.p_dbt_command",
-                "type": "Expression"
-              },
+            "dbt_server": {
+              "value": "xe6b73af6wce5cpkwv3dpk3vzi-g67texv6yj3enfghs4qteohnga.datawarehouse.fabric.microsoft.com",
               "type": "string"
             },
-            "p_dbt_args": {
-              "value": {
-                "value": "@pipeline().parameters.p_dbt_args",
-                "type": "Expression"
-              },
+            "dbt_command": {
+              "value": "build",
+              "type": "string"
+            },
+            "dbt_args": {
+              "value": "",
               "type": "string"
             }
           }
         },
         "policy": {
-          "timeout": "0.01:00:00",
+          "timeout": "0.12:00:00",
           "retry": 0,
           "retryIntervalInSeconds": 30,
-          "secureInput": true,
+          "secureInput": false,
           "secureOutput": false
         },
-        "name": "nb_run_dbt",
+        "name": "run_dbt",
         "dependsOn": []
       }
-    ],
-    "parameters": {
-      "p_ado_token": {
-        "type": "securestring"
-      },
-      "p_branch": {
-        "type": "string",
-        "defaultValue": "main"
-      },
-      "p_dbt_target": {
-        "type": "string",
-        "defaultValue": "dev"
-      },
-      "p_dbt_command": {
-        "type": "string",
-        "defaultValue": "build"
-      },
-      "p_dbt_args": {
-        "type": "string",
-        "defaultValue": ""
-      }
-    }
+    ]
   }
 }

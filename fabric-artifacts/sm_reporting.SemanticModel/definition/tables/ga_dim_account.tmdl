@@ -1,0 +1,48 @@
+/// Current account dimension with one row per account. Use account fields to group or filter spend measures; card tier is the current account-level card tier.
+table ga_dim_account
+	lineageTag: 1f500a3a-f13c-4cfd-95be-9debddc18251
+
+	column AccountSK
+		dataType: string
+		isHidden
+		lineageTag: f0426919-497c-4c8b-a565-834612141390
+		summarizeBy: none
+		sourceColumn: ga_dim_account_sk
+
+	/// Account identifier used as the natural label for account-level results.
+	column AccountID
+		dataType: int64
+		lineageTag: fd8c023b-edea-4e40-84bd-51e53510b5a7
+		isDefaultLabel
+		summarizeBy: none
+		sourceColumn: account_id
+
+	column CurrentBalance
+		dataType: decimal
+		formatString: #,##0.00
+		lineageTag: a9a72fb5-5c51-4ea6-9742-1a92105d8c45
+		summarizeBy: none
+		sourceColumn: current_balance_amt
+
+	/// Optional debit-card identifier; at most one card per account.
+	column CardID
+		dataType: int64
+		lineageTag: 023d6d16-89c0-4a5f-9ecf-de3df822f707
+		summarizeBy: none
+		sourceColumn: card_id
+
+	/// Current debit-card tier denormalized into the account; blank for accounts without a card.
+	/// Current card tier denormalized into the account; use for grouping accounts by their current card tier.
+	column CardTier
+		dataType: string
+		lineageTag: b7c4ca51-e611-4f33-9f99-3a8037f80baa
+		summarizeBy: none
+		sourceColumn: card_tier_nm
+
+	partition ga_dim_account = entity
+		mode: directLake
+		source
+			entityName: ga_dim_account
+			schemaName: oystr_core_gold
+			expressionSource: DatabaseQuery
+

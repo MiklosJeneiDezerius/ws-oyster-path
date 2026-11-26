@@ -1,0 +1,257 @@
+/// One row per account and snapshot date. Use explicit measures for metrics and the related date, account, or customer dimension fields for grouping and filtering.
+table g_fct_periodic_spend_snapshot
+	lineageTag: 0cff53d2-37cb-4958-bc31-837b830cbf73
+
+	/// 30-day spend at the last snapshot date in the current filter context; never sums overlapping daily windows.
+	measure 'Total Spend' =
+			VAR _snapshotDate = CALCULATE(MAX('g_fct_periodic_spend_snapshot'[SnapshotDate]), REMOVEFILTERS('g_fct_periodic_spend_snapshot'[CalculatedSpendingTier]))
+			RETURN CALCULATE(SUM('g_fct_periodic_spend_snapshot'[Rolling30DaySpend]), 'g_fct_periodic_spend_snapshot'[SnapshotDate] = _snapshotDate)
+		formatString: #,##0.00
+		lineageTag: dad47475-2998-487c-a27d-36f816de7791
+
+		changedProperty = Name
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	/// Distinct accounts at the last snapshot date in the current filter context.
+	measure 'Total Accounts' =
+			VAR _snapshotDate = CALCULATE(MAX('g_fct_periodic_spend_snapshot'[SnapshotDate]), REMOVEFILTERS('g_fct_periodic_spend_snapshot'[CalculatedSpendingTier]))
+			RETURN CALCULATE(DISTINCTCOUNT('g_fct_periodic_spend_snapshot'[AccountID]), 'g_fct_periodic_spend_snapshot'[SnapshotDate] = _snapshotDate)
+		formatString: #,##0
+		lineageTag: a9b66d99-9dce-4728-bc23-9b3326980e63
+
+		changedProperty = Name
+
+	/// Accounts with at least 5000 spend in the latest 30-day snapshot.
+	measure 'Platinum Accounts' = COALESCE(CALCULATE([Total Accounts], KEEPFILTERS('g_fct_periodic_spend_snapshot'[CalculatedSpendingTier] = "Platinum")), 0)
+		formatString: #,##0
+		lineageTag: ea9c93bc-7b7a-4db9-be8c-74965bb5acd9
+
+	/// Accounts with 2000 to less than 5000 spend in the latest 30-day snapshot.
+	measure 'Gold Accounts' = COALESCE(CALCULATE([Total Accounts], KEEPFILTERS('g_fct_periodic_spend_snapshot'[CalculatedSpendingTier] = "Gold")), 0)
+		formatString: #,##0
+		lineageTag: 4b0dd1c2-acbe-4144-90be-81fd93f2015d
+
+	measure 'Total No. of Cards' =
+			COALESCE (
+				DISTINCTCOUNTNOBLANK ( 'g_fct_periodic_spend_snapshot'[CardID] ),
+				0
+			)
+		formatString: 0
+		lineageTag: bf2fce6e-d850-45a4-bd8a-056f22010f55
+
+		changedProperty = Name
+
+	measure 'Upgrade Candidate Cards' =
+			CALCULATE (
+				[Total No. of Cards],
+				KEEPFILTERS ( 'g_fct_periodic_spend_snapshot'[IsUpgradeCandidate] = 1 )
+			)
+		formatString: 0
+		lineageTag: 1effcd3f-9ba9-48e1-abd8-86cacdd55a2b
+
+		changedProperty = Name
+
+	measure 'Downgrade Candidate Cards' =
+			CALCULATE (
+				[Total No. of Cards],
+				KEEPFILTERS ( 'g_fct_periodic_spend_snapshot'[IsLowSpendPremiumAnomaly] = 1 )
+			)
+		formatString: 0
+		lineageTag: ff1f27c3-3ad8-4550-8ef3-058b48e80aa0
+
+		changedProperty = Name
+
+	measure 'Misaligned Cards' =
+			CALCULATE (
+				[Total No. of Cards],
+				KEEPFILTERS ( 'g_fct_periodic_spend_snapshot'[AlignmentStatus] = "Misaligned" )
+			)
+		formatString: 0
+		lineageTag: a9c3570b-91a0-4e6e-81b0-48115b1131cb
+
+		changedProperty = Name
+
+	measure 'Aligned Cards' =
+			CALCULATE (
+				[Total No. of Cards],
+				KEEPFILTERS ( 'g_fct_periodic_spend_snapshot'[AlignmentStatus] = "Aligned" )
+			)
+		formatString: 0
+		lineageTag: 2bc9f0aa-182b-4bad-91ac-e094436f0cae
+
+		changedProperty = Name
+
+	measure 'Tier Mismatch Rate' = DIVIDE ( [Misaligned Cards], [Total No. of Cards], 0 )
+		lineageTag: 04e6108a-e922-460e-9122-dcde6884c441
+
+		changedProperty = Name
+
+	column SpendSnapshotSK
+		dataType: string
+		isHidden
+		sourceProviderType: varchar(64)
+		lineageTag: 15e751ee-995c-4c4c-948a-6e8ec896a8cd
+		sourceLineageTag: g_fct_periodic_spend_snapshot_sk
+		summarizeBy: none
+		sourceColumn: g_fct_periodic_spend_snapshot_sk
+
+		annotation SummarizationSetBy = Automatic
+
+	column DateSK
+		dataType: int64
+		isHidden
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: 4cb477f4-2af1-4535-9787-522e62761ac6
+		sourceLineageTag: s_dim_date_sk
+		summarizeBy: none
+		sourceColumn: s_dim_date_sk
+
+		annotation SummarizationSetBy = Automatic
+
+	column SnapshotDate
+		dataType: dateTime
+		formatString: General Date
+		sourceProviderType: date
+		lineageTag: bc1407c1-cb82-4830-a8cc-c75899a3cf1c
+		sourceLineageTag: snapshot_dt
+		summarizeBy: none
+		sourceColumn: snapshot_dt
+
+		annotation SummarizationSetBy = Automatic
+
+	column AccountSK
+		dataType: string
+		isHidden
+		sourceProviderType: varchar(64)
+		lineageTag: 1d806f88-236a-4f3f-abe4-958c2b18bd3a
+		sourceLineageTag: s_dim_account_sk
+		summarizeBy: none
+		sourceColumn: s_dim_account_sk
+
+		annotation SummarizationSetBy = Automatic
+
+	column AccountID
+		dataType: int64
+		sourceProviderType: int
+		lineageTag: 95529211-f2f0-45e1-b1aa-85f451432193
+		sourceLineageTag: account_id
+		summarizeBy: none
+		sourceColumn: account_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column CardSK
+		dataType: string
+		isHidden
+		sourceProviderType: varchar(64)
+		lineageTag: c657e58e-f678-4e4f-8f01-8597f4ce4486
+		sourceLineageTag: s_dim_card_sk
+		summarizeBy: none
+		sourceColumn: s_dim_card_sk
+
+		annotation SummarizationSetBy = Automatic
+
+	column CardID
+		dataType: int64
+		formatString: 0
+		lineageTag: 78abc6e8-9795-4f43-b7ed-f9b7a12163fe
+		sourceLineageTag: card_id
+		summarizeBy: none
+		sourceColumn: card_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column CustomerSK
+		dataType: string
+		isHidden
+		sourceProviderType: varchar(64)
+		lineageTag: f1d0175d-cb6b-49e5-827c-978401858cff
+		sourceLineageTag: s_dim_customer_sk
+		summarizeBy: none
+		sourceColumn: s_dim_customer_sk
+
+		annotation SummarizationSetBy = Automatic
+
+	column Rolling30DaySpend
+		dataType: decimal
+		isHidden
+		sourceProviderType: decimal(38, 4)
+		lineageTag: 3eb37d68-688d-4e82-a721-8ced0f987b68
+		sourceLineageTag: rolling_30_day_spend_amt
+		summarizeBy: sum
+		sourceColumn: rolling_30_day_spend_amt
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column CalculatedSpendingTier
+		dataType: string
+		sourceProviderType: varchar(8)
+		lineageTag: 9f4583ac-5f6b-4201-b924-d7c2e48dc60d
+		sourceLineageTag: calculated_spending_tier_nm
+		summarizeBy: none
+		sourceColumn: calculated_spending_tier_nm
+
+		annotation SummarizationSetBy = Automatic
+
+	column ActualCardTier
+		dataType: string
+		lineageTag: 2e06b943-1c1b-4139-b278-3b366d61d5a6
+		sourceLineageTag: actual_card_tier_nm
+		summarizeBy: none
+		sourceColumn: actual_card_tier_nm
+
+		annotation SummarizationSetBy = Automatic
+
+	column IsUpgradeCandidate
+		dataType: int64
+		formatString: 0
+		lineageTag: e1eeaf3b-647b-44d9-8935-9eed442d0b0d
+		sourceLineageTag: is_upgrade_candidate_flag
+		summarizeBy: none
+		sourceColumn: is_upgrade_candidate_flag
+
+		annotation SummarizationSetBy = Automatic
+
+	column IsLowSpendPremiumAnomaly
+		dataType: int64
+		formatString: 0
+		lineageTag: 8afba62d-f7ec-41ff-bb7c-f5d9ee6f1f08
+		sourceLineageTag: is_low_spend_premium_anomaly_flag
+		summarizeBy: none
+		sourceColumn: is_low_spend_premium_anomaly_flag
+
+		annotation SummarizationSetBy = Automatic
+
+	column AlignmentStatus
+		dataType: string
+		lineageTag: a71144ea-5ef5-41a8-a108-4d6641748f1a
+		sourceLineageTag: alignment_status_cd
+		summarizeBy: none
+		sourceColumn: alignment_status_cd
+
+		annotation SummarizationSetBy = Automatic
+
+	column SnapshotMaterializedTS
+		dataType: dateTime
+		formatString: General Date
+		sourceProviderType: datetime2
+		lineageTag: 4d5638b9-a190-495c-88bb-bb31d2838022
+		sourceLineageTag: snapshot_materialized_dttm
+		summarizeBy: none
+		sourceColumn: snapshot_materialized_dttm
+
+		annotation SummarizationSetBy = Automatic
+
+	partition g_fct_periodic_spend_snapshot = entity
+		mode: directLake
+		source
+			entityName: g_fct_periodic_spend_snapshot
+			schemaName: oystr_core_gold
+			expressionSource: DatabaseQuery
+
+	annotation PBI_ResultType = Table
+

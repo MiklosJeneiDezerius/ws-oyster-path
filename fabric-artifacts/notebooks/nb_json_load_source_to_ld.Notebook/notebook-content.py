@@ -1,13 +1,5 @@
 # Fabric notebook source
 
-# METADATA ********************
-
-# META {
-# META   "kernel_info": {
-# META     "name": "synapse_pyspark"
-# META   },
-# META   "dependencies": {}
-# META }
 
 # CELL ********************
 
@@ -18,20 +10,18 @@
 # MAGIC     }
 # MAGIC }
 
-# METADATA ********************
+# PARAMETERS CELL ********************
 
+p_load_date = ""
+p_root_path = "Files/oyster/landing_raw"
+p_in_table_name = "Transaction_Ledger"
+p_debug = 0
+
+# METADATA ********************
 # META {
 # META   "language": "python",
 # META   "language_group": "synapse_pyspark"
 # META }
-
-# PARAMETERS CELL ********************
-
-# Parameters (pipelines override these; in the Fabric UI this shows as the "Parameters" cell).
-p_root_path = "Files/landing/oyster"
-p_batch_folder = ""   # "" = latest batch folder (yyyyMMddHHmmss names sort chronologically); or e.g. "20261118072024"
-p_in_table_name = ""  # JSON file prefix; currently only "Transaction_Ledger" is supported
-p_debug = 0           # 1 = display a preview of the loaded table
 
 # METADATA ********************
 
@@ -42,173 +32,155 @@ p_debug = 0           # 1 = display a preview of the loaded table
 
 # MARKDOWN ********************
 
-# # Nested transaction JSON to Landing Delta
-# The generator writes `Transaction_Ledger_<ts>.json` as JSON Lines: one document per account, with the
-# transactions split into arrays of 20 (`Data.TransactionBatches`, an array of arrays).
-# `flatten()` merges the inner arrays into one array per account and `explode()` emits one row per
-# transaction. For the generator's equivalent CSV and JSON files, the business columns and batch
-# timestamp match the CSV-loaded `ld_oys_transaction_ledger`; source filename and load time can differ.
-# The target is derived from the source name, as in the CSV loader, and is overwritten. Enable
-# only one format per source: the two loaders must not overwrite this table concurrently.
+# # Oyster Core nested JSON to Delta
+# flatten() combines the per-account arrays and explode() emits one row per
+# transaction. The resulting Delta table uses the CSV loader's core schema.
 
 # CELL ********************
 
+import glob
+import json
+import os
 import re
-from datetime import datetime, timezone
-from functools import reduce
-from operator import or_
-from pyspark.sql import functions as F
+from datetime import datetime
+
+from pyspark.sql import Window
+from pyspark.sql.functions import col, current_timestamp, desc, explode, flatten, lit, row_number
 from pyspark.sql.types import ArrayType, StringType, StructField, StructType
 
-REQUIRED_COLUMNS = ["TransactionID", "AccountID", "Amount", "Timestamp"]
-file_prefix = p_in_table_name.strip()
-if not re.fullmatch(r"[A-Za-z0-9_]+", file_prefix):
-    raise ValueError("p_in_table_name must be a non-empty JSON file prefix containing only letters, digits and underscores")
-if file_prefix != "Transaction_Ledger":
-    raise ValueError(f"{file_prefix}: only Transaction_Ledger JSON is supported")
-table_name = f"dbo.ld_oys_{file_prefix.lower()}"
+required_columns = ["TransactionID", "AccountID", "Amount", "Timestamp"]
+if p_in_table_name != "Transaction_Ledger":
+    raise ValueError(f"Unsupported JSON source: {p_in_table_name}")
+if not p_root_path:
+    raise ValueError("p_root_path is required.")
 
-# Batch folders are named yyyyMMddHHmmss (UTC) by the generator; 14-digit names sort chronologically
-batch_folders = [
-    f.name.rstrip("/")
-    for f in notebookutils.fs.ls(p_root_path)
-    if f.isDir and re.fullmatch(r"\d{14}", f.name.rstrip("/"))
-]
-if not batch_folders:
-    raise FileNotFoundError(f"No batch folders found under {p_root_path}")
-if p_batch_folder and p_batch_folder not in batch_folders:
-    raise FileNotFoundError(f"Batch folder {p_batch_folder} not found under {p_root_path}")
-batch_folder = p_batch_folder or max(batch_folders)
+valid_date = datetime.strptime(p_load_date, "%Y%m%d") if p_load_date else datetime.now()
+root_path = p_root_path.rstrip("/")
+if root_path == "Files" or root_path.startswith("Files/"):
+    root_path = os.path.join("/lakehouse/default", root_path)
+pattern = os.path.join(root_path, "**", "Transaction_Ledger_*_core.json")
+source_files = glob.glob(pattern, recursive=True)
+if not source_files:
+    raise FileNotFoundError(f"No JSON files match {pattern}")
 
-batch_ts = datetime.strptime(batch_folder, "%Y%m%d%H%M%S")    # when the source extracted the data
-load_ts = datetime.now(timezone.utc).replace(tzinfo=None)
-print(f"Batch {batch_folder} (of {len(batch_folders)}) | source: {file_prefix} | target: {table_name} | load_ts (UTC): {load_ts}")
+envelopes = []
+for path in source_files:
+    match = re.search(r"/(\d{8}_\d{6}|\d{14}|\d{8})/[^/]+$", path)
+    if not match:
+        raise ValueError(f"Missing source batch timestamp in {path}")
+    timestamp_text = match.group(1)
+    timestamp_format = (
+        "%Y%m%d_%H%M%S" if "_" in timestamp_text
+        else "%Y%m%d%H%M%S" if len(timestamp_text) == 14
+        else "%Y%m%d"
+    )
+    source_timestamp = datetime.strptime(timestamp_text, timestamp_format).isoformat(sep=" ")
+    normalized_batches = []
+    try:
+        with open(path, "r", encoding="utf-8-sig") as json_file:
+            for line_number, line in enumerate(json_file, start=1):
+                if not line.strip():
+                    continue
+                try:
+                    document = json.loads(line)
+                except json.JSONDecodeError as error:
+                    raise ValueError(f"Invalid JSON in {path}, line {line_number}") from error
 
-# METADATA ********************
+                data = document.get("Data") if isinstance(document, dict) else None
+                batches = data.get("TransactionBatches") if isinstance(data, dict) else None
+                if not isinstance(batches, list) or not batches:
+                    raise ValueError(
+                        f"Expected non-empty Data.TransactionBatches in {path}, line {line_number}"
+                    )
 
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
+                for batch_number, batch in enumerate(batches, start=1):
+                    if not isinstance(batch, list) or not batch:
+                        raise ValueError(
+                            f"Expected a non-empty transaction batch in {path}, "
+                            f"line {line_number}, batch {batch_number}"
+                        )
+                    normalized_batch = []
+                    for row_idx, entry in enumerate(batch, start=1):
+                        record = entry.get("transaction", entry) if isinstance(entry, dict) else None
+                        if not isinstance(record, dict):
+                            raise ValueError(
+                                f"Expected transaction object in {path}, line {line_number}, "
+                                f"batch {batch_number}, row {row_idx}"
+                            )
+                        missing_columns = set(required_columns) - set(record)
+                        if missing_columns:
+                            raise ValueError(
+                                f"Missing required columns {sorted(missing_columns)} in {path}, "
+                                f"line {line_number}"
+                            )
+                        values = {name: record[name] for name in required_columns}
+                        if any(value is None or isinstance(value, (dict, list)) for value in values.values()):
+                            raise ValueError(
+                                f"Invalid transaction field in {path}, line {line_number}, "
+                                f"batch {batch_number}, row {row_idx}"
+                            )
+                        normalized_batch.append({
+                            "transaction": {name: str(value) for name, value in values.items()}
+                        })
+                    normalized_batches.append(normalized_batch)
+    except UnicodeDecodeError as error:
+        raise ValueError(f"Invalid text encoding in {path}") from error
 
-# CELL ********************
+    if not normalized_batches:
+        raise ValueError(f"No transaction batches found in {path}")
+    envelopes.append((normalized_batches, source_timestamp, path))
 
-# Explicit schema: every transaction field is STRING, as in the CSV landing; types are applied in
-# Silver. The generator writes IDs as JSON integers and Amount/Timestamp as strings.
-transaction_schema = StructType([StructField(c, StringType()) for c in REQUIRED_COLUMNS])
-document_schema = StructType([
-    StructField("SourceSystem", StringType()),
-    StructField("IngestDate", StringType()),
-    StructField("Data", StructType([
-        StructField("AccountID", StringType()),
-        StructField("TransactionBatches", ArrayType(ArrayType(transaction_schema))),
-    ])),
+transaction_schema = StructType([
+    StructField(name, StringType(), False) for name in required_columns
+])
+entry_schema = StructType([StructField("transaction", transaction_schema, False)])
+envelope_schema = StructType([
+    StructField(
+        "transaction_batches",
+        ArrayType(ArrayType(entry_schema, containsNull=False), containsNull=False),
+        False,
+    ),
+    StructField("m_source_dttm", StringType(), False),
+    StructField("m_source_file", StringType(), False),
 ])
 
-path = f"{p_root_path}/{batch_folder}/{file_prefix}_*.json"
-documents = (
-    spark.read.schema(document_schema)
-    .option("mode", "FAILFAST")        # a malformed JSON line fails the run instead of becoming a null row
-    .json(path)
-    .select("*", F.col("_metadata.file_name").alias("meta_source_file"))
+nested = spark.createDataFrame(envelopes, envelope_schema)
+flattened = nested.select(
+    "m_source_dttm",
+    "m_source_file",
+    explode(flatten(col("transaction_batches"))).alias("entry"),
 )
-if not documents.take(1):
-    raise ValueError(f"{file_prefix}: no JSON documents in {path}")
-
-# 1) Envelope validation: every document must carry an account and at least one non-empty batch
-bad_envelopes = documents.filter(
-    F.col("Data.AccountID").isNull()
-    | F.col("Data.TransactionBatches").isNull()
-    | (F.size("Data.TransactionBatches") == 0)
-    | F.exists("Data.TransactionBatches", lambda b: b.isNull() | (F.size(b) == 0))
-).count()
-if bad_envelopes:
-    raise ValueError(f"{file_prefix}: {bad_envelopes} document(s) without AccountID or with empty batches in {path}")
-
-# 2) flatten: array<array<struct>> -> array<struct>; explode: one row per transaction
-transactions = (
-    documents
-    .select(
-        F.col("Data.AccountID").alias("envelope_account_id"),
-        F.explode(F.flatten("Data.TransactionBatches")).alias("tx"),
-        "meta_source_file",
-    )
-    .select("envelope_account_id", "tx.*", "meta_source_file")
-)
-if not transactions.take(1):
-    raise ValueError(f"{file_prefix}: source file contains no transaction rows in {path}")
-
-# 3) Row validation: required fields present, transaction belongs to its envelope account, unique key
-missing = transactions.filter(
-    reduce(or_, [F.col(c).isNull() | (F.trim(F.col(c)) == "") for c in REQUIRED_COLUMNS])
-).count()
-if missing:
-    raise ValueError(f"{file_prefix}: {missing} transaction(s) with an empty required field in {path}")
-
-foreign = transactions.filter(F.col("AccountID") != F.col("envelope_account_id")).count()
-if foreign:
-    raise ValueError(f"{file_prefix}: {foreign} transaction(s) nested under a different AccountID in {path}")
-
-duplicates = transactions.groupBy("TransactionID").count().filter("count > 1").count()
-if duplicates:
-    raise ValueError(f"{file_prefix}: {duplicates} duplicated TransactionID value(s) in {path}")
-
-# 4) Same column contract as the CSV loader
-out = transactions.select(
-    *REQUIRED_COLUMNS,
-    F.lit(batch_ts).alias("meta_batch_timestamp"),
-    F.lit(load_ts).alias("meta_load_timestamp"),
-    "meta_source_file",
+rows = flattened.select(
+    *[col(f"entry.transaction.{name}").alias(name) for name in required_columns],
+    col("m_source_dttm").cast("timestamp").alias("m_source_dttm"),
+    col("m_source_file"),
 )
 
-# METADATA ********************
-
-# META {
-# META   "language": "python",
-# META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# Write only after every check above passed (a bad file changes nothing)
-(
-    out.write.format("delta")
-    .mode("overwrite")
-    .option("overwriteSchema", "true")
-    .saveAsTable(table_name)
+latest = Window.partitionBy("TransactionID").orderBy(
+    desc("m_source_dttm"), desc("m_source_file"), desc("TransactionID"),
 )
-print(f"Loaded {file_prefix} JSON -> {table_name}")
+output = (
+    rows.withColumn("_rn", row_number().over(latest))
+    .filter(col("_rn") == 1)
+    .drop("_rn")
+    .withColumn("m_valid_dt", lit(valid_date.strftime("%Y-%m-%d")))
+    .withColumn("m_company_cd", lit("oyster"))
+    .withColumn("m_source_system_cd", lit("oys"))
+    .withColumn("m_table_nm", lit(p_in_table_name))
+    .withColumn("m_loaded_at_dttm", current_timestamp())
+)
+
+table_name = "ld_oys_transaction_ledger"
 if int(p_debug):
-    display(spark.table(table_name).limit(10))
+    display(output)
+output.write.format("delta").option("overwriteSchema", "true").mode("overwrite").saveAsTable(table_name)
+print(f"Loaded {p_in_table_name} from nested JSON into {table_name}")
 
 # METADATA ********************
-
 # META {
 # META   "language": "python",
 # META   "language_group": "synapse_pyspark"
-# META }
-
-# CELL ********************
-
-# Verify only the target written by this invocation.
-summary = (
-    spark.table(table_name)
-    .groupBy("meta_batch_timestamp", "meta_load_timestamp", "meta_source_file")
-    .agg(F.count("*").alias("row_count"))
-    .collect()
-)
-if not summary:
-    raise ValueError(f"{table_name}: no rows after loading batch {batch_folder}")
-for row in summary:
-    if row.meta_batch_timestamp != batch_ts or row.meta_load_timestamp != load_ts:
-        raise ValueError(
-            f"{table_name}: expected batch {batch_ts} and load time {load_ts}; "
-            f"found batch {row.meta_batch_timestamp} and load time {row.meta_load_timestamp}"
-        )
-    print(
-        f"Verified {table_name}: batch={row.meta_batch_timestamp}, "
-        f"load={row.meta_load_timestamp}, file={row.meta_source_file}, rows={row.row_count}"
-    )
+# META 
 
 # METADATA ********************
 

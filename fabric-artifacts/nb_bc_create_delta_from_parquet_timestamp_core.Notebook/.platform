@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "nb_bc_create_delta_from_parquet_timestamp_core"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "3bad21f3-efac-8252-4d35-bf716a322b52"
+  }
+}

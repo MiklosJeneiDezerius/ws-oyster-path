@@ -2,68 +2,9 @@
   "properties": {
     "activities": [
       {
-        "type": "PBISemanticModelRefresh",
-        "typeProperties": {
-          "method": "POST",
-          "groupId": "00000000-0000-0000-0000-000000000000",
-          "datasetId": "79f4b3cf-73a9-9b6d-45bf-20a95317b0e5",
-          "commitMode": "transactional",
-          "waitOnCompletion": true,
-          "operationType": "SemanticModelRefresh"
-        },
-        "externalReferences": {
-          "connection": "cbe086b5-9d49-4561-8700-5a9616c45af7"
-        },
-        "policy": {
-          "timeout": "0.02:00:00",
-          "retry": 0,
-          "retryIntervalInSeconds": 30,
-          "secureInput": false,
-          "secureOutput": false
-        },
-        "name": "Refresh semantic model",
-        "dependsOn": [
-          {
-            "activity": "DW create ans test",
-            "dependencyConditions": [
-              "Succeeded"
-            ]
-          }
-        ]
-      },
-      {
         "type": "InvokePipeline",
         "typeProperties": {
-          "parameters": {
-            "p_simulate_changes": 0
-          },
-          "waitOnCompletion": true,
-          "workspaceId": "5e32bf37-c2be-4676-94c7-97213238ed30",
-          "pipelineId": "a335715f-dd78-4564-b93f-0cff36a9975d",
-          "operationType": "InvokeFabricPipeline"
-        },
-        "externalReferences": {
-          "connection": "99d25f00-7a8c-4e9b-99fc-15696270fc7e"
-        },
-        "policy": {
-          "timeout": "0.12:00:00",
-          "retry": 0,
-          "retryIntervalInSeconds": 30,
-          "secureInput": false,
-          "secureOutput": false
-        },
-        "name": "Generate Data",
-        "state": "Inactive",
-        "onInactiveMarkAs": "Succeeded",
-        "dependsOn": []
-      },
-      {
-        "type": "InvokePipeline",
-        "typeProperties": {
-          "parameters": {
-            "p_batch_folder": "",
-            "p_root_folder": "landing/oyster"
-          },
+          "parameters": {},
           "waitOnCompletion": true,
           "workspaceId": "00000000-0000-0000-0000-000000000000",
           "pipelineId": "7f96d73c-3b59-4573-b3a6-350165eeb1ab",
@@ -93,15 +34,33 @@
         "type": "InvokePipeline",
         "typeProperties": {
           "parameters": {
-            "p_ado_token": {
-              "value": "@pipeline().parameters.p_ado_token",
+            "num_customers": {
+              "value": "@pipeline().parameters.num_customers",
               "type": "Expression"
-            },
-            "p_branch": "main",
-            "p_dbt_target": "dev",
-            "p_dbt_command": "build",
-            "p_dbt_args": ""
+            }
           },
+          "waitOnCompletion": true,
+          "workspaceId": "00000000-0000-0000-0000-000000000000",
+          "pipelineId": "2b39e20c-492b-45cc-a7b9-c4d0968eb7df",
+          "operationType": "InvokeFabricPipeline"
+        },
+        "externalReferences": {
+          "connection": "339168a1-80c8-4dfe-afc0-e1072653b1bf"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Generate Data",
+        "dependsOn": []
+      },
+      {
+        "type": "InvokePipeline",
+        "typeProperties": {
+          "parameters": {},
           "waitOnCompletion": true,
           "workspaceId": "00000000-0000-0000-0000-000000000000",
           "pipelineId": "f3cf59a1-9aa5-4b8c-a887-bda4888c908d",
@@ -117,7 +76,7 @@
           "secureInput": false,
           "secureOutput": false
         },
-        "name": "DW create ans test",
+        "name": "DW create and load",
         "dependsOn": [
           {
             "activity": "Load Delta",
@@ -126,19 +85,41 @@
             ]
           }
         ]
+      },
+      {
+        "type": "InvokePipeline",
+        "typeProperties": {
+          "parameters": {},
+          "waitOnCompletion": true,
+          "workspaceId": "00000000-0000-0000-0000-000000000000",
+          "pipelineId": "2e572ce3-a9bf-b465-4904-7f29eafa3549",
+          "operationType": "InvokeFabricPipeline"
+        },
+        "externalReferences": {
+          "connection": "339168a1-80c8-4dfe-afc0-e1072653b1bf"
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "pl_Refresh_Semantic_Model",
+        "dependsOn": [
+          {
+            "activity": "DW create and load",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
       }
     ],
     "parameters": {
-      "p_simulate_changes": {
+      "num_customers": {
         "type": "int",
-        "defaultValue": 0
-      },
-      "p_ado_token": {
-        "type": "securestring",
-        "defaultValue": {
-          "type": "SecureString",
-          "value": "**********"
-        }
+        "defaultValue": 83
       }
     }
   }

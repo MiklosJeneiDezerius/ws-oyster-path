@@ -1,11 +1,10 @@
+/// Bind this placeholder to the core workspace SQL endpoint before refreshing the model.
 expression DatabaseQuery =
 		let
-		    database = Sql.Database("XE6B73AF6WCE5CPKWV3DPK3VZI-G67TEXV6YJ3ENFGHS4QTEOHNGA.datawarehouse.fabric.microsoft.com", "0761cf33-4317-4eff-8f22-d19f43343686")
+		    database = Sql.Database("xe6b73af6wce5cpkwv3dpk3vzi-htsck64qztlehhjsieqb3d7vzi.datawarehouse.fabric.microsoft.com", "dw_oyster_core")
 		in
 		    database
-	lineageTag: 96e0e413-fc12-485c-abbf-747ab934435d
+	lineageTag: ff3d465e-d208-4657-822a-6656c07dd1ac
 
 	annotation PBI_IncludeFutureArtifacts = False
-
-	annotation PBI_RemovedChildren = [{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[dev_gold].[gold_fct_transaction]"}},"objectType":"Table"},{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[dev_gold].[gold_dim_time]"}},"objectType":"Table"}]
 

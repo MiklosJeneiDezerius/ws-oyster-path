@@ -2,62 +2,6 @@
   "properties": {
     "activities": [
       {
-        "type": "SetVariable",
-        "typeProperties": {
-          "variableName": "v_load_date",
-          "value": {
-            "value": "@convertFromUtc(utcNow(), 'Central Europe Standard Time', 'yyyy-MM-dd HH:mm:ss')",
-            "type": "Expression"
-          }
-        },
-        "policy": {
-          "secureInput": false,
-          "secureOutput": false
-        },
-        "name": "Set v_load_date",
-        "dependsOn": []
-      },
-      {
-        "type": "TridentNotebook",
-        "typeProperties": {
-          "notebookId": "72da4409-1aab-4c93-9a64-b346e3bb07df",
-          "workspaceId": "00000000-0000-0000-0000-000000000000",
-          "parameters": {
-            "p_root_path": {
-              "value": {
-                "value": "@concat('Files/', pipeline().parameters.p_root_folder)",
-                "type": "Expression"
-              },
-              "type": "string"
-            },
-            "p_batch_folder": {
-              "value": {
-                "value": "@coalesce(pipeline().parameters.p_batch_folder, '')",
-                "type": "Expression"
-              },
-              "type": "string"
-            }
-          },
-          "sessionTag": "oyster_landing"
-        },
-        "policy": {
-          "timeout": "0.01:00:00",
-          "retry": 0,
-          "retryIntervalInSeconds": 30,
-          "secureInput": false,
-          "secureOutput": false
-        },
-        "name": "nb_resolve_landing_batch",
-        "dependsOn": [
-          {
-            "activity": "Set v_load_date",
-            "dependencyConditions": [
-              "Succeeded"
-            ]
-          }
-        ]
-      },
-      {
         "type": "Lookup",
         "typeProperties": {
           "source": {
@@ -67,7 +11,7 @@
             },
             "storeSettings": {
               "type": "LakehouseReadSettings",
-              "recursive": false,
+              "recursive": true,
               "enablePartitionDiscovery": false
             }
           },
@@ -76,7 +20,7 @@
             "typeProperties": {
               "location": {
                 "type": "LakehouseLocation",
-                "folderPath": "config",
+                "folderPath": "config/oyster_path_core",
                 "fileName": "load_config.csv"
               },
               "columnDelimiter": ",",
@@ -102,7 +46,7 @@
           "firstRowOnly": false
         },
         "policy": {
-          "timeout": "0.00:10:00",
+          "timeout": "0.12:00:00",
           "retry": 0,
           "retryIntervalInSeconds": 30,
           "secureInput": false,
@@ -111,12 +55,90 @@
         "name": "lkp_GetLoadConfig",
         "dependsOn": [
           {
-            "activity": "nb_resolve_landing_batch",
+            "activity": "Set Variable v_load_date",
             "dependencyConditions": [
               "Succeeded"
             ]
           }
         ]
+      },
+      {
+        "type": "ForEach",
+        "typeProperties": {
+          "isSequential": false,
+          "batchCount": 2,
+          "items": {
+            "value": "@activity('Filter - active tables').output.Value",
+            "type": "Expression"
+          },
+          "activities": [
+            {
+              "type": "TridentNotebook",
+              "typeProperties": {
+                "notebookId": "0ffc4433-cfb2-af0b-4c3f-e69c730f3dc7",
+                "workspaceId": "00000000-0000-0000-0000-000000000000",
+                "parameters": {
+                  "p_load_date": {
+                    "value": {
+                      "value": "@variables('v_load_date')",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "p_root_path": {
+                    "value": "Files/oyster/landing_raw",
+                    "type": "string"
+                  },
+                  "p_in_table_name": {
+                    "value": {
+                      "value": "@item().source_object_name",
+                      "type": "Expression"
+                    },
+                    "type": "string"
+                  },
+                  "p_debug": {
+                    "value": "0",
+                    "type": "int"
+                  }
+                }
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "nb_ProcessDeltaTable",
+              "dependsOn": []
+            }
+          ]
+        },
+        "name": "forEach_FileLoader",
+        "dependsOn": [
+          {
+            "activity": "Filter - active tables",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      },
+      {
+        "type": "SetVariable",
+        "typeProperties": {
+          "variableName": "v_load_date",
+          "value": {
+            "value": "@if(empty(pipeline().parameters.p_load_date), formatDateTime(convertFromUtc(utcNow(), 'Central Europe Standard Time'), 'yyyyMMdd'), pipeline().parameters.p_load_date)",
+            "type": "Expression"
+          }
+        },
+        "policy": {
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Set Variable v_load_date",
+        "dependsOn": []
       },
       {
         "type": "Filter",
@@ -139,154 +161,12 @@
             ]
           }
         ]
-      },
-      {
-        "type": "ForEach",
-        "typeProperties": {
-          "isSequential": false,
-          "batchCount": 2,
-          "items": {
-            "value": "@activity('Filter - active tables').output.value",
-            "type": "Expression"
-          },
-          "activities": [
-            {
-              "type": "Switch",
-              "typeProperties": {
-                "on": {
-                  "value": "@toLower(trim(item().type))",
-                  "type": "Expression"
-                },
-                "cases": [
-                  {
-                    "value": "csv",
-                    "activities": [
-                      {
-                        "type": "TridentNotebook",
-                        "typeProperties": {
-                          "notebookId": "0ffc4433-cfb2-af0b-4c3f-e69c730f3dc7",
-                          "workspaceId": "00000000-0000-0000-0000-000000000000",
-                          "parameters": {
-                            "p_root_path": {
-                              "value": {
-                                "value": "@concat('Files/', pipeline().parameters.p_root_folder)",
-                                "type": "Expression"
-                              },
-                              "type": "string"
-                            },
-                            "p_batch_folder": {
-                              "value": {
-                                "value": "@activity('nb_resolve_landing_batch').output.result.exitValue",
-                                "type": "Expression"
-                              },
-                              "type": "string"
-                            },
-                            "p_in_table_name": {
-                              "value": {
-                                "value": "@item().source_object_name",
-                                "type": "Expression"
-                              },
-                              "type": "string"
-                            }
-                          },
-                          "sessionTag": "oyster_landing"
-                        },
-                        "policy": {
-                          "timeout": "0.01:00:00",
-                          "retry": 0,
-                          "retryIntervalInSeconds": 30,
-                          "secureInput": false,
-                          "secureOutput": false
-                        },
-                        "name": "nb_csv_load_source_to_ld",
-                        "dependsOn": []
-                      }
-                    ]
-                  },
-                  {
-                    "value": "json",
-                    "activities": [
-                      {
-                        "type": "TridentNotebook",
-                        "typeProperties": {
-                          "notebookId": "d7cffd77-c81a-aba4-487b-1656b3a1ed2b",
-                          "workspaceId": "00000000-0000-0000-0000-000000000000",
-                          "parameters": {
-                            "p_root_path": {
-                              "value": {
-                                "value": "@concat('Files/', pipeline().parameters.p_root_folder)",
-                                "type": "Expression"
-                              },
-                              "type": "string"
-                            },
-                            "p_batch_folder": {
-                              "value": {
-                                "value": "@activity('nb_resolve_landing_batch').output.result.exitValue",
-                                "type": "Expression"
-                              },
-                              "type": "string"
-                            },
-                            "p_in_table_name": {
-                              "value": {
-                                "value": "@item().source_object_name",
-                                "type": "Expression"
-                              },
-                              "type": "string"
-                            }
-                          },
-                          "sessionTag": "oyster_landing"
-                        },
-                        "policy": {
-                          "timeout": "0.01:00:00",
-                          "retry": 0,
-                          "retryIntervalInSeconds": 30,
-                          "secureInput": false,
-                          "secureOutput": false
-                        },
-                        "name": "nb_json_load_source_to_ld",
-                        "dependsOn": []
-                      }
-                    ]
-                  }
-                ],
-                "defaultActivities": [
-                  {
-                    "type": "Fail",
-                    "typeProperties": {
-                      "message": {
-                        "value": "@concat('Unsupported type ''', item().type, ''' for ', item().source_object_name)",
-                        "type": "Expression"
-                      },
-                      "errorCode": "UNSUPPORTED_SOURCE_TYPE"
-                    },
-                    "name": "Fail - unknown type",
-                    "dependsOn": []
-                  }
-                ]
-              },
-              "name": "sw_FileType",
-              "dependsOn": []
-            }
-          ]
-        },
-        "name": "forEach_FileLoader",
-        "dependsOn": [
-          {
-            "activity": "Filter - active tables",
-            "dependencyConditions": [
-              "Succeeded"
-            ]
-          }
-        ]
       }
     ],
     "parameters": {
-      "p_batch_folder": {
-        "type": "string"
-      },
-      "p_root_folder": {
+      "p_load_date": {
         "type": "string",
-        "defaultValue": "landing/oyster"
+        "defaultValue": ""
       }
     },
     "variables": {
