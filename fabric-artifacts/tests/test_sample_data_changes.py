@@ -12,7 +12,7 @@ from unittest.mock import Mock
 
 NOTEBOOK = (
     Path(__file__).resolve().parents[1]
-    / "notebooks"
+    / "040_Notebooks" / "030_Framework_notebooks" / "010_Landing_raw"
     / "nb_generate_deterministic_sample_data.Notebook"
     / "notebook-content.py"
 )

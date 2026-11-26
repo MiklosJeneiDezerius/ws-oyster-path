@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "nb_run_dbt_devops",
+    "description": "Clones the dbt project from Azure DevOps and runs dbt (build by default) against the Fabric Warehouse."
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "7af5baca-b714-4fe3-97ee-2a25054c9b2f"
+  }
+}

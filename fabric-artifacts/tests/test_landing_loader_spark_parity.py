@@ -10,7 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-NOTEBOOKS = Path(__file__).resolve().parents[1] / "notebooks"
+NOTEBOOKS = (Path(__file__).resolve().parents[1] / "040_Notebooks" / "030_Framework_notebooks"
+             / "020_Landing_delta")
 HAS_PYSPARK = importlib.util.find_spec("pyspark") is not None
 FIELDS = ["TransactionID", "AccountID", "Amount", "Timestamp"]
 BATCH = "20261117080003"

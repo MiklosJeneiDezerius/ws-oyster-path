@@ -8,7 +8,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 
-NOTEBOOK = Path(__file__).resolve().parents[1] / "notebooks" / "nb_csv_load_source_to_ld.Notebook" / "notebook-content.py"
+NOTEBOOK = (Path(__file__).resolve().parents[1] / "040_Notebooks" / "030_Framework_notebooks"
+            / "020_Landing_delta" / "nb_csv_load_source_to_ld.Notebook" / "notebook-content.py")
 SOURCE = NOTEBOOK.read_text(encoding="utf-8")
 
 

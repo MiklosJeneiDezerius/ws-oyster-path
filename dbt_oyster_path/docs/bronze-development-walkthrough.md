@@ -374,7 +374,7 @@ scripts; exported metadata must not become executable cell content.
 manual validation and later invocation by the raw-generation pipeline.
 
 Open or import the existing
-[generator notebook](../../fabric-artifacts/notebooks/nb_generate_deterministic_sample_data.Notebook/notebook-content.py)
+[generator notebook](../../fabric-artifacts/040_Notebooks/030_Framework_notebooks/010_Landing_raw/nb_generate_deterministic_sample_data.Notebook/notebook-content.py)
 in the Fabric workspace. For a fresh workspace, create a Notebook named
 `nb_generate_deterministic_sample_data` and transfer its code cells.
 
@@ -669,7 +669,7 @@ discovery, loops, metadata, and validation.
 to distinguish Files from Tables; later iterations replace its minimal reader.
 
 Open the existing
-[loader notebook](../../fabric-artifacts/notebooks/nb_csv_load_source_to_ld.Notebook/notebook-content.py)
+[loader notebook](../../fabric-artifacts/040_Notebooks/030_Framework_notebooks/020_Landing_delta/nb_csv_load_source_to_ld.Notebook/notebook-content.py)
 and attach the same default Lakehouse.
 
 For teaching the basic file-to-table mechanism, start with one explicit,
@@ -1229,7 +1229,7 @@ for file_prefix, (table_name, out) in prepared.items():
 
 **Cell 4 - verify the tables written by this historical invocation:** read back
 only the targets in `prepared`, which is built from `p_entities`. The current
-[CSV loader](../../fabric-artifacts/notebooks/nb_csv_load_source_to_ld.Notebook/notebook-content.py)
+[CSV loader](../../fabric-artifacts/040_Notebooks/030_Framework_notebooks/020_Landing_delta/nb_csv_load_source_to_ld.Notebook/notebook-content.py)
 instead reads back its single derived target. Both report row counts by source
 file and fail if a checked table is empty or contains an unexpected batch or
 load timestamp. A pipeline iteration does not check tables owned by other
@@ -1639,7 +1639,7 @@ expression is not enough to reproduce the pipeline.
 **When and why used:** add each row when developing the corresponding L2
 activity, then inspect its resolved input/output during a test run. These
 expressions come from the checked-in
-[Landing pipeline definition](../../fabric-artifacts/pipelines/pl_jb_landing_delta.DataPipeline/pipeline-content.json).
+[Landing pipeline definition](../../fabric-artifacts/030_Pipelines/040_Jobs/020_Landing_delta/pl_jb_landing_delta.DataPipeline/pipeline-content.json).
 
 In the Fabric expression editor, paste the full expression including the
 leading `@`. In exported JSON, it is the `value` of an object whose `type`
@@ -5078,10 +5078,10 @@ Python, Spark, and dbt logic in independently testable items.
 
 | Item | Purpose and responsibility |
 |---|---|
-| Master: [`pl_fl_master`](../../fabric-artifacts/pipelines/e316df99-b1e8-b45a-430b-9968433f6858.DataPipeline/pipeline-content.json) | Provides the overall entry point and orders generation, Landing, DW build, and semantic-model refresh. It waits for the children and uses success dependencies so a failed step does not start its downstream step. The tutorial's earlier workspace master is called `pl_Master_Core`. |
-| Raw child: [`pl_jb_landing_raw`](../../fabric-artifacts/pipelines/pl_jb_landing_raw.DataPipeline/pipeline-content.json) | Wraps sample-data generation as an independently runnable unit and passes `p_simulate_changes` to the generator. The historical workspace name is `pl_Landing_Raw_Core`. |
-| Landing child: [`pl_jb_landing_delta`](../../fabric-artifacts/pipelines/pl_jb_landing_delta.DataPipeline/pipeline-content.json) | Resolves one batch, reads and filters the load configuration, and routes active sources to the CSV or JSON loader. The parallel loop uses a maximum batch count of two; an unsupported format fails explicitly. The historical workspace name is `pl_Landing_Delta_Core`. |
-| DW child: [`pl_jb_create_dw`](../../fabric-artifacts/pipelines/pl_jb_create_dw.DataPipeline/pipeline-content.json) | Exposes the dbt runner and its inputs as a separately runnable Warehouse build and test step. The historical workspace name is `pl_Create_DW_Core`. |
+| Master: [`pl_fl_master`](../../fabric-artifacts/030_Pipelines/020_Flows/pl_fl_master.DataPipeline/pipeline-content.json) | Provides the overall entry point and orders generation, Landing, DW build, and semantic-model refresh. It waits for the children and uses success dependencies so a failed step does not start its downstream step. The tutorial's earlier workspace master is called `pl_Master_Core`. |
+| Raw child: [`pl_jb_landing_raw`](../../fabric-artifacts/030_Pipelines/040_Jobs/010_Landing_Raw/pl_jb_landing_raw.DataPipeline/pipeline-content.json) | Wraps sample-data generation as an independently runnable unit and passes `p_simulate_changes` to the generator. The historical workspace name is `pl_Landing_Raw_Core`. |
+| Landing child: [`pl_jb_landing_delta`](../../fabric-artifacts/030_Pipelines/040_Jobs/020_Landing_delta/pl_jb_landing_delta.DataPipeline/pipeline-content.json) | Resolves one batch, reads and filters the load configuration, and routes active sources to the CSV or JSON loader. The parallel loop uses a maximum batch count of two; an unsupported format fails explicitly. The historical workspace name is `pl_Landing_Delta_Core`. |
+| DW child: [`pl_jb_create_dw`](../../fabric-artifacts/030_Pipelines/040_Jobs/pl_jb_create_dw.DataPipeline/pipeline-content.json) | Exposes the dbt runner and its inputs as a separately runnable Warehouse build and test step. The historical workspace name is `pl_Create_DW_Core`. |
 
 Separate children split the workflow into smaller, easier-to-understand
 units. Each child can be tested independently with controlled inputs and
@@ -5096,11 +5096,11 @@ The notebooks called by these children perform the actual work:
 
 | Notebook | Purpose |
 |---|---|
-| [`nb_generate_deterministic_sample_data`](../../fabric-artifacts/notebooks/nb_generate_deterministic_sample_data.Notebook/notebook-content.py) | Produces reproducible synthetic source files in a batch folder; the change-simulation parameter lets snapshot and incremental behavior be tested. |
-| [`nb_resolve_landing_batch`](../../fabric-artifacts/notebooks/nb_resolve_landing_batch.Notebook/notebook-content.py) | Selects and validates the requested or latest batch once and returns its folder through `notebookutils.notebook.exit`. All loaders therefore use the same batch even if a newer one arrives during the run. |
-| [`nb_csv_load_source_to_ld`](../../fabric-artifacts/notebooks/nb_csv_load_source_to_ld.Notebook/notebook-content.py) | Loads a configured CSV entity into a Landing Delta table, checks the input and written data, and adds batch, load-time, and source-file metadata. It does not validate business keys or required business columns. |
-| [`nb_json_load_source_to_ld`](../../fabric-artifacts/notebooks/nb_json_load_source_to_ld.Notebook/notebook-content.py) | Validates and flattens nested transaction JSON into Landing Delta, with the same metadata. Its current JSON support is limited to `Transaction_Ledger`. |
-| [`nb_run_dbt`](../../fabric-artifacts/notebooks/nb_run_dbt.Notebook/notebook-content.py) | Sets up the pinned dbt runtime, obtains the project and credentials, refreshes the Lakehouse SQL endpoint metadata when configured, runs dbt, and persists run artifacts. Errors are raised to the calling pipeline. The SQL endpoint refresh lets dbt see the latest Landing Delta versions; it is not a semantic-model refresh. |
+| [`nb_generate_deterministic_sample_data`](../../fabric-artifacts/040_Notebooks/030_Framework_notebooks/010_Landing_raw/nb_generate_deterministic_sample_data.Notebook/notebook-content.py) | Produces reproducible synthetic source files in a batch folder; the change-simulation parameter lets snapshot and incremental behavior be tested. |
+| [`nb_resolve_landing_batch`](../../fabric-artifacts/040_Notebooks/030_Framework_notebooks/020_Landing_delta/nb_resolve_landing_batch.Notebook/notebook-content.py) | Selects and validates the requested or latest batch once and returns its folder through `notebookutils.notebook.exit`. All loaders therefore use the same batch even if a newer one arrives during the run. |
+| [`nb_csv_load_source_to_ld`](../../fabric-artifacts/040_Notebooks/030_Framework_notebooks/020_Landing_delta/nb_csv_load_source_to_ld.Notebook/notebook-content.py) | Loads a configured CSV entity into a Landing Delta table, checks the input and written data, and adds batch, load-time, and source-file metadata. It does not validate business keys or required business columns. |
+| [`nb_json_load_source_to_ld`](../../fabric-artifacts/040_Notebooks/030_Framework_notebooks/020_Landing_delta/nb_json_load_source_to_ld.Notebook/notebook-content.py) | Validates and flattens nested transaction JSON into Landing Delta, with the same metadata. Its current JSON support is limited to `Transaction_Ledger`. |
+| [`nb_run_dbt`](../../fabric-artifacts/040_Notebooks/030_Framework_notebooks/040_dbt/nb_run_dbt.Notebook/notebook-content.py) | Sets up the pinned dbt runtime, obtains the project and credentials, refreshes the Lakehouse SQL endpoint metadata when configured, runs dbt, and persists run artifacts. Errors are raised to the calling pipeline. The SQL endpoint refresh lets dbt see the latest Landing Delta versions; it is not a semantic-model refresh. |
 
 **Why notebooks here?** They provide a parameterized Fabric execution
 environment with Python, Spark, Lakehouse access, and notebook utilities.
@@ -5384,8 +5384,8 @@ binding and execution checks described below.
 - The Landing load is metadata-driven: a new source is one row in
   `Files/config/load_config.csv`, not a pipeline change.
 
-The repository copies are in `fabric-artifacts/pipelines/<name>.DataPipeline/`
-(`pipeline-content.json` and `.platform`).
+The repository copies are in `fabric-artifacts/030_Pipelines/`, organized by
+flow and job type (`pipeline-content.json` and `.platform`).
 
 #### The config file
 
@@ -5428,7 +5428,7 @@ parameters, set `p_simulate_changes` to type **Int** and dynamic value
 `@pipeline().parameters.p_simulate_changes`. It passes `0` for the baseline
 or `1` for the controlled changes; the expression passes the value without
 converting it to text. This mapping is present in the
-[raw pipeline definition](../../fabric-artifacts/pipelines/pl_jb_landing_raw.DataPipeline/pipeline-content.json).
+[raw pipeline definition](../../fabric-artifacts/030_Pipelines/040_Jobs/010_Landing_Raw/pl_jb_landing_raw.DataPipeline/pipeline-content.json).
 The optional `customer_count` to `CUSTOMER_COUNT` mapping in E9 is a separate
 teaching improvement, not a parameter already exposed by this export.
 
@@ -5561,7 +5561,7 @@ follow-up at the time of this historical run.
 
 **Master inputs: distinguish expressions from literals.** The preceding
 flow describes the historical tutorial run. The current checked-in
-[master definition](../../fabric-artifacts/pipelines/e316df99-b1e8-b45a-430b-9968433f6858.DataPipeline/pipeline-content.json)
+[master definition](../../fabric-artifacts/030_Pipelines/020_Flows/pl_fl_master.DataPipeline/pipeline-content.json)
 uses `InvokePipeline` activities and contains the following child inputs:
 
 | Master activity | Child parameter | Current exported value | Interpretation |
@@ -5710,7 +5710,7 @@ at zero. Save, run manually, and inspect persisted artifacts before master wirin
 
 **DW child expressions:** in `nb_run_dbt` **Settings > Base parameters**, use
 the exact dynamic mappings below from the
-[DW pipeline definition](../../fabric-artifacts/pipelines/pl_jb_create_dw.DataPipeline/pipeline-content.json).
+[DW pipeline definition](../../fabric-artifacts/030_Pipelines/040_Jobs/pl_jb_create_dw.DataPipeline/pipeline-content.json).
 The right-hand side reads the child pipeline's inputs, not the master's
 inputs directly; the master must first pass its values into the child.
 
@@ -6110,8 +6110,8 @@ development data pipeline is green.
 - [Dev/prod profiles](../profiles.yml)
 - [Schema naming macro](../macros/generate_schema_name.sql)
 - [Landing sources, column documentation, key tests, freshness](../models/000_Source/_landing__sources.yml)
-- [Generator notebook](../../fabric-artifacts/notebooks/nb_generate_deterministic_sample_data.Notebook/notebook-content.py)
-- [Loader notebook](../../fabric-artifacts/notebooks/nb_csv_load_source_to_ld.Notebook/notebook-content.py)
+- [Generator notebook](../../fabric-artifacts/040_Notebooks/030_Framework_notebooks/010_Landing_raw/nb_generate_deterministic_sample_data.Notebook/notebook-content.py)
+- [Loader notebook](../../fabric-artifacts/040_Notebooks/030_Framework_notebooks/020_Landing_delta/nb_csv_load_source_to_ld.Notebook/notebook-content.py)
 - [Four snapshots and their column tests](../snapshots/bronze/_bronze__snapshots.yml)
 - [Incremental ledger](../models/010_Bronze/b_oys_transaction_ledger.sql)
 - [Ledger column tests and operational description](../models/010_Bronze/_bronze__models.yml)

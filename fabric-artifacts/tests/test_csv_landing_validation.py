@@ -9,7 +9,8 @@ from unittest.mock import Mock
 
 NOTEBOOK = (
     Path(__file__).resolve().parents[1]
-    / "notebooks" / "nb_csv_load_source_to_ld.Notebook" / "notebook-content.py"
+    / "040_Notebooks" / "030_Framework_notebooks" / "020_Landing_delta"
+    / "nb_csv_load_source_to_ld.Notebook" / "notebook-content.py"
 )
 BATCH = datetime(2026, 11, 19, 12, 12, 33)
 LOAD = datetime(2026, 11, 19, 12, 19, 22)

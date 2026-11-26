@@ -8,7 +8,8 @@ from unittest.mock import Mock
 
 
 ARTIFACTS = Path(__file__).resolve().parents[1]
-RESOLVER = ARTIFACTS / "notebooks" / "nb_resolve_landing_batch.Notebook"
+RESOLVER = (ARTIFACTS / "040_Notebooks" / "030_Framework_notebooks" / "020_Landing_delta"
+            / "nb_resolve_landing_batch.Notebook")
 SOURCE = (RESOLVER / "notebook-content.py").read_text(encoding="utf-8")
 BODY = SOURCE.rsplit("# CELL ********************", 1)[1]
 OLDER = "20261117080003"
@@ -75,7 +76,8 @@ class LandingBatchTests(unittest.TestCase):
             exec(BODY, {"p_root_path": "Files/landing/oyster", "p_batch_folder": "", "notebookutils": utils})
 
     def test_pipeline_wiring(self):
-        pipeline_path = ARTIFACTS / "pipelines" / "pl_jb_landing_delta.DataPipeline" / "pipeline-content.json"
+        pipeline_path = (ARTIFACTS / "030_Pipelines" / "040_Jobs" / "020_Landing_delta"
+                         / "pl_jb_landing_delta.DataPipeline" / "pipeline-content.json")
         properties = json.loads(pipeline_path.read_text(encoding="utf-8"))["properties"]
         activities = {activity["name"]: activity for activity in properties["activities"]}
         self.assertEqual(list(activities), [
